@@ -1,11 +1,11 @@
-* LOGIN SCHEMA * 
+/* LOGIN SCHEMA - temporary until we add relational schema from ER digram */
 CREATE DATABASE IF NOT EXISTS reservation_system;
 USE reservation_system;
 
-* create initial user and grant privileges *
-CREATE USER IF NOT EXISTS 'testuser'@'localhost' IDENTIFIED BY 'test';
-ALTER USER 'testuser'@'localhost' IDENTIFIED BY 'test';
-GRANT ALL PRIVILEGES ON reservation_system.* TO 'testuser'@'localhost';
+/* create initial user and grant privileges */
+CREATE USER IF NOT EXISTS 'test'@'localhost' IDENTIFIED BY 'group16';
+ALTER USER 'test'@'localhost' IDENTIFIED BY 'group16';
+GRANT ALL PRIVILEGES ON reservation_system.* TO 'test'@'localhost';
 FLUSH PRIVILEGES;
 
 CREATE TABLE IF NOT EXISTS users (

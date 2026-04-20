@@ -89,7 +89,7 @@ public class ProjectFrame extends JFrame {
                         userLoggedin = true;
                         msg.setText(s);
                     } else {
-                        String s = "Unknow user " + user + " not logged in";
+                        String s = "Unknown user: invalid username or password";
                         msg.setText(s);
                     }
                 } catch (SQLException e1) {
@@ -144,9 +144,9 @@ public class ProjectFrame extends JFrame {
 
     public static void main(String[] args) throws Exception {
         // Initialize the connection to the database
-        String url = "jdbc:mysql://localhost:3306/testproject";
-        String user = "testuser";
-        String password = "abc123";
+        String url = "jdbc:mysql://localhost:3306/reservation_system";
+        String user = "test";
+        String password = "group16";
 
         try {
             con = DriverManager.getConnection(url, user, password);
