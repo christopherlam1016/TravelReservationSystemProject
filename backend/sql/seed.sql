@@ -1,4 +1,4 @@
-USE testproject;
+USE reservation_system;
 
 INSERT INTO users (user, password)
 VALUES ('test', 'group16')

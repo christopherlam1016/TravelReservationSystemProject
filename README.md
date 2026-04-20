@@ -52,7 +52,7 @@ SQL setup files:
 2. Run the SQL scripts in order:
 	- backend/sql/schema.sql
 	- backend/sql/seed.sql
-3. Ensure a JDK is installed (Java 17 recommended).
+3. Ensure a JDK is installed
 4. Ensure Maven is installed.
 5. From the repository root, move to the frontend folder:
 
@@ -65,15 +65,5 @@ SQL setup files:
 7. Run the app with Maven:
 
    mvn exec:java
-
-## Optional Manual Run (No Maven)
-
-If you prefer manual classpath setup, compile and run from repo root:
-
-javac frontend/src/ProjectFrame.java
-
-java -cp "frontend/src:path/to/mysql-connector-j-8.x.x.jar" ProjectFrame
-
-Use : as the classpath separator on macOS/Linux.
 
 ## Notes
