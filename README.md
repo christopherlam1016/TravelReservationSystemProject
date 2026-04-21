@@ -40,11 +40,11 @@ SQL setup files:
 - backend/sql/seed.sql
 
 `schema.sql` creates:
-- Database: `testproject`
+- Database: `reservation_system`
 - Table: `users(user, password)`
 
 `seed.sql` inserts/updates:
-- Default user: `testuser` / `abc123`
+- Default user: `test` / `group16`
 
 ## how to run
 
