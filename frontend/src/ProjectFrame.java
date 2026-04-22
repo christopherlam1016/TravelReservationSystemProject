@@ -1,6 +1,10 @@
 import java.sql.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 
@@ -12,8 +16,13 @@ public class ProjectFrame extends JFrame {
     JLabel loginStatus;
     JLabel dashboardHeader;
     JLabel customerInfoLabel;
-    JTextField tfFrom, tfTo, tfDate;
+    JComboBox<String> cbFrom, cbTo;
+    JSpinner dateSpinner;
+    JCheckBox chkAnyDate;
+    JTable flightTable;
+    List<Long> flightRowIds = new ArrayList<>();
     DefaultTableModel flightTableModel;
+    DefaultTableModel bookingsTableModel;
 
     CardLayout cardLayout;
     JPanel rootPanel;
@@ -230,30 +239,111 @@ public class ProjectFrame extends JFrame {
         customerPanel.setBorder(BorderFactory.createTitledBorder("Customer Information"));
         customerPanel.add(customerInfoLabel, BorderLayout.CENTER);
 
+        String[] airports = {
+            "Any",
+            "ATL - Hartsfield-Jackson Atlanta",
+            "LAX - Los Angeles International",
+            "ORD - O'Hare International (Chicago)",
+            "DFW - Dallas/Fort Worth International",
+            "DEN - Denver International",
+            "JFK - John F. Kennedy International (New York)",
+            "SFO - San Francisco International",
+            "SEA - Seattle-Tacoma International",
+            "LAS - Harry Reid International (Las Vegas)",
+            "MCO - Orlando International",
+            "EWR - Newark Liberty International",
+            "MIA - Miami International",
+            "PHX - Phoenix Sky Harbor International",
+            "IAH - George Bush Intercontinental (Houston)",
+            "BOS - Logan International (Boston)",
+            "MSP - Minneapolis-Saint Paul International",
+            "DTW - Detroit Metropolitan Wayne County",
+            "PHL - Philadelphia International",
+            "LGA - LaGuardia (New York)",
+            "CLT - Charlotte Douglas International",
+            "SLC - Salt Lake City International",
+            "BWI - Baltimore/Washington International",
+            "SAN - San Diego International",
+            "MDW - Chicago Midway International",
+            "TPA - Tampa International",
+            "HNL - Daniel K. Inouye International (Honolulu)",
+            "PDX - Portland International",
+            "STL - St. Louis Lambert International",
+            "BNA - Nashville International",
+            "AUS - Austin-Bergstrom International",
+            "MCI - Kansas City International",
+            "RDU - Raleigh-Durham International",
+            "FLL - Fort Lauderdale-Hollywood International",
+            "OAK - Oakland International",
+            "SMF - Sacramento International",
+            "SJC - Norman Y. Mineta San Jose International",
+            "ABQ - Albuquerque International Sunport",
+            "MSY - Louis Armstrong New Orleans International",
+            "JAX - Jacksonville International",
+            "IND - Indianapolis International",
+            "PIT - Pittsburgh International",
+            "CMH - John Glenn Columbus International",
+            "CLE - Cleveland Hopkins International",
+            "MKE - General Mitchell International (Milwaukee)"
+        };
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        cbFrom = new JComboBox<>(airports);
+        cbTo = new JComboBox<>(airports);
+        cbFrom.setFont(fieldFont);
+        cbTo.setFont(fieldFont);
+
+        SpinnerDateModel dateModel = new SpinnerDateModel();
+        dateSpinner = new JSpinner(dateModel);
+        JSpinner.DateEditor dateEditor = new JSpinner.DateEditor(dateSpinner, "yyyy-MM-dd");
+        dateSpinner.setEditor(dateEditor);
+        dateSpinner.setFont(fieldFont);
+        dateSpinner.setEnabled(false);
+
+        chkAnyDate = new JCheckBox("Any Date");
+        chkAnyDate.setSelected(true);
+        chkAnyDate.setOpaque(false);
+        chkAnyDate.setFont(fieldFont);
+        chkAnyDate.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dateSpinner.setEnabled(!chkAnyDate.isSelected());
+            }
+        });
+
+        JPanel datePanel = new JPanel(new BorderLayout(4, 0));
+        datePanel.setOpaque(false);
+        datePanel.add(dateSpinner, BorderLayout.CENTER);
+        datePanel.add(chkAnyDate, BorderLayout.EAST);
+
         JPanel searchPanel = new JPanel(new GridLayout(2, 4, 8, 8));
         searchPanel.setOpaque(false);
         searchPanel.setBorder(BorderFactory.createTitledBorder("Explore Flights"));
         JLabel lbFrom = new JLabel("From Airport");
         JLabel lbTo = new JLabel("To Airport");
-        JLabel lbDate = new JLabel("Date (YYYY-MM-DD)");
+        JLabel lbDate = new JLabel("Departure Date");
         JLabel lbBlank = new JLabel();
-        tfFrom = new JTextField();
-        tfTo = new JTextField();
-        tfDate = new JTextField();
         JButton btnSearchFlights = new JButton("Search Flights");
 
-        lbFrom.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
-        lbTo.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
-        lbDate.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
-        tfFrom.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
-        tfTo.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
-        tfDate.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
+        lbFrom.setFont(fieldFont);
+        lbTo.setFont(fieldFont);
+        lbDate.setFont(fieldFont);
         btnSearchFlights.setFont(new Font("Lucida Sans", Font.BOLD, 14));
 
         btnSearchFlights.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                loadFlights(tfFrom.getText(), tfTo.getText(), tfDate.getText());
+                String fromSel = cbFrom.getSelectedItem().toString();
+                String toSel = cbTo.getSelectedItem().toString();
+                String fromCode = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
+                String toCode = toSel.equals("Any") ? "" : toSel.substring(0, 3);
+                String dateStr = "";
+                if (!chkAnyDate.isSelected()) {
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+                    dateStr = sdf.format((Date) dateSpinner.getValue());
+                }
+                loadFlights(fromCode, toCode, dateStr);
             }
         });
 
@@ -261,9 +351,9 @@ public class ProjectFrame extends JFrame {
         searchPanel.add(lbTo);
         searchPanel.add(lbDate);
         searchPanel.add(lbBlank);
-        searchPanel.add(tfFrom);
-        searchPanel.add(tfTo);
-        searchPanel.add(tfDate);
+        searchPanel.add(cbFrom);
+        searchPanel.add(cbTo);
+        searchPanel.add(datePanel);
         searchPanel.add(btnSearchFlights);
 
         flightTableModel = new DefaultTableModel(
@@ -274,10 +364,21 @@ public class ProjectFrame extends JFrame {
             }
         };
 
-        JTable flightTable = new JTable(flightTableModel);
+        flightTable = new JTable(flightTableModel);
         flightTable.setRowHeight(22);
+        flightTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    int row = flightTable.getSelectedRow();
+                    if (row >= 0 && row < flightRowIds.size()) {
+                        showBookingForm(row);
+                    }
+                }
+            }
+        });
         JScrollPane tableScrollPane = new JScrollPane(flightTable);
-        tableScrollPane.setBorder(BorderFactory.createTitledBorder("Matching Flights"));
+        tableScrollPane.setBorder(BorderFactory.createTitledBorder("Matching Flights (double-click to book)"));
 
         JPanel centerPanel = new JPanel();
         centerPanel.setOpaque(false);
@@ -294,6 +395,41 @@ public class ProjectFrame extends JFrame {
         centerPanel.add(searchPanel);
         centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
         centerPanel.add(tableScrollPane);
+
+        bookingsTableModel = new DefaultTableModel(
+                new String[]{ "Ticket ID", "Type", "Class", "Status", "Seat",
+                              "Dep. Date", "Flight #", "Airline", "From", "To" }, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) { return false; }
+        };
+        JTable bookingsTable = new JTable(bookingsTableModel);
+        bookingsTable.setRowHeight(22);
+        JScrollPane bookingsScrollPane = new JScrollPane(bookingsTable);
+        bookingsScrollPane.setBorder(BorderFactory.createTitledBorder("My Bookings"));
+        bookingsScrollPane.setPreferredSize(new Dimension(800, 180));
+        bookingsScrollPane.setMinimumSize(new Dimension(350, 120));
+
+        JButton btnLoadBookings = new JButton("Load My Bookings");
+        btnLoadBookings.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnLoadBookings.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                loadMyBookings();
+            }
+        });
+
+        JPanel bookingsPanel = new JPanel();
+        bookingsPanel.setOpaque(false);
+        bookingsPanel.setLayout(new BoxLayout(bookingsPanel, BoxLayout.Y_AXIS));
+        bookingsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnLoadBookings.setAlignmentX(Component.LEFT_ALIGNMENT);
+        bookingsScrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
+        bookingsPanel.add(btnLoadBookings);
+        bookingsPanel.add(Box.createRigidArea(new Dimension(0, 4)));
+        bookingsPanel.add(bookingsScrollPane);
+
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+        centerPanel.add(bookingsPanel);
 
         JScrollPane dashboardScrollPane = new JScrollPane(centerPanel);
         dashboardScrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -318,7 +454,8 @@ public class ProjectFrame extends JFrame {
         }
 
         flightTableModel.setRowCount(0);
-        String sql = "SELECT FlightNumber, Airline_Name, DepartureAirport, ArrivalAirport, "
+        flightRowIds.clear();
+        String sql = "SELECT FlightID, FlightNumber, Airline_Name, DepartureAirport, ArrivalAirport, "
                 + "DepartureTime, ArrivalTime, Travel_Type FROM Flight WHERE 1=1";
 
         boolean filterFrom = fromAirport != null && !fromAirport.trim().isEmpty();
@@ -350,6 +487,7 @@ public class ProjectFrame extends JFrame {
 
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
+                    flightRowIds.add(rs.getLong("FlightID"));
                     flightTableModel.addRow(new Object[] {
                             rs.getInt("FlightNumber"),
                             rs.getString("Airline_Name"),
@@ -363,6 +501,158 @@ public class ProjectFrame extends JFrame {
             }
         } catch (SQLException e) {
             msg.setText("Unable to load flights: " + e.getMessage());
+        }
+    }
+
+    private void showBookingForm(int rowIndex) {
+        long flightId   = flightRowIds.get(rowIndex);
+        int  flightNum  = (Integer) flightTableModel.getValueAt(rowIndex, 0);
+        String airline  = (String)  flightTableModel.getValueAt(rowIndex, 1);
+        String from     = (String)  flightTableModel.getValueAt(rowIndex, 2);
+        String to       = (String)  flightTableModel.getValueAt(rowIndex, 3);
+        String dep      = flightTableModel.getValueAt(rowIndex, 4).toString();
+
+        JDialog dialog = new JDialog(this, "Book Flight", true);
+        dialog.setLayout(new BorderLayout(10, 10));
+        dialog.setSize(440, 300);
+        dialog.setLocationRelativeTo(this);
+
+        Font dlgFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        JLabel infoLabel = new JLabel("<html><b>Flight " + flightNum + "</b> · " + airline
+                + "<br/>" + from + " → " + to + " · Dep: " + dep + "</html>");
+        infoLabel.setFont(dlgFont);
+        infoLabel.setBorder(BorderFactory.createTitledBorder("Selected Flight"));
+
+        JComboBox<String> cbTicketType = new JComboBox<>(new String[]{"one_way", "round_trip"});
+        JComboBox<String> cbClass      = new JComboBox<>(new String[]{"economy", "business", "first"});
+        JTextField tfSeat = new JTextField();
+        JTextField tfMeal = new JTextField();
+        cbTicketType.setFont(dlgFont); cbClass.setFont(dlgFont);
+        tfSeat.setFont(dlgFont);       tfMeal.setFont(dlgFont);
+
+        JPanel formPanel = new JPanel(new GridLayout(4, 2, 8, 6));
+        formPanel.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        for (String lbl : new String[]{"Ticket Type", "Class", "Seat Number", "Special Meal"}) {
+            JLabel l = new JLabel(lbl); l.setFont(dlgFont); formPanel.add(l);
+            if (lbl.equals("Ticket Type")) formPanel.add(cbTicketType);
+            else if (lbl.equals("Class"))  formPanel.add(cbClass);
+            else if (lbl.equals("Seat Number")) formPanel.add(tfSeat);
+            else formPanel.add(tfMeal);
+        }
+
+        JButton btnConfirm = new JButton("Confirm Booking");
+        JButton btnCancel  = new JButton("Cancel");
+        btnConfirm.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnCancel.setFont(dlgFont);
+        JPanel btnPanel = new JPanel(new GridLayout(1, 2, 8, 0));
+        btnPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 8, 10));
+        btnPanel.add(btnConfirm); btnPanel.add(btnCancel);
+
+        btnCancel.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { dialog.dispose(); }
+        });
+
+        btnConfirm.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String lookupSql = "SELECT AccountID, CustomerID FROM Account WHERE AccountID = ?";
+                try (PreparedStatement ps = con.prepareStatement(lookupSql)) {
+                    ps.setString(1, user);
+                    ResultSet rs = ps.executeQuery();
+                    if (!rs.next()) {
+                        JOptionPane.showMessageDialog(dialog,
+                            "No customer profile found for '" + user + "'.\nContact an admin to set one up.",
+                            "Profile Not Found", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    String accountId  = rs.getString("AccountID");
+                    int    customerId = rs.getInt("CustomerID");
+                    String depDate    = dep.length() >= 10 ? dep.substring(0, 10) : dep;
+                    String ticketId   = "TKT-" + System.currentTimeMillis();
+                    long   ticketNum  = System.currentTimeMillis();
+                    String seatNum    = tfSeat.getText().trim().isEmpty() ? null : tfSeat.getText().trim();
+                    String meal       = tfMeal.getText().trim().isEmpty() ? null : tfMeal.getText().trim();
+
+                    String insTicket = "INSERT INTO Ticket "
+                        + "(TicketID, TicketNumber, TicketType, FlightClass, BookingFee, TotalFare, "
+                        + "Flexibility, FromAirport, ToAirport, IsPaid, Status, CustomerID, AccountID) "
+                        + "VALUES (?, ?, ?, ?, 0.00, 0.00, FALSE, ?, ?, FALSE, 'booked', ?, ?)";
+                    try (PreparedStatement psT = con.prepareStatement(insTicket)) {
+                        psT.setString(1, ticketId);
+                        psT.setLong(2, ticketNum);
+                        psT.setString(3, cbTicketType.getSelectedItem().toString());
+                        psT.setString(4, cbClass.getSelectedItem().toString());
+                        psT.setString(5, from);
+                        psT.setString(6, to);
+                        psT.setInt(7, customerId);
+                        psT.setString(8, accountId);
+                        psT.executeUpdate();
+                    }
+
+                    String insSeg = "INSERT INTO TicketSegment "
+                        + "(TicketID, SegmentOrder, FlightID, DepartureDate, SeatNumber, SpecialMeal, SegmentFare) "
+                        + "VALUES (?, 1, ?, ?, ?, ?, 0.00)";
+                    try (PreparedStatement psS = con.prepareStatement(insSeg)) {
+                        psS.setString(1, ticketId);
+                        psS.setLong(2, flightId);
+                        psS.setString(3, depDate);
+                        psS.setString(4, seatNum);
+                        psS.setString(5, meal);
+                        psS.executeUpdate();
+                    }
+
+                    JOptionPane.showMessageDialog(dialog,
+                        "Booking confirmed!\nTicket ID: " + ticketId,
+                        "Booking Confirmed", JOptionPane.INFORMATION_MESSAGE);
+                    dialog.dispose();
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(dialog,
+                        "Booking failed: " + ex.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        dialog.add(infoLabel,  BorderLayout.NORTH);
+        dialog.add(formPanel,  BorderLayout.CENTER);
+        dialog.add(btnPanel,   BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    private void loadMyBookings() {
+        if (bookingsTableModel == null) return;
+        bookingsTableModel.setRowCount(0);
+
+        String sql = "SELECT t.TicketID, t.TicketType, t.FlightClass, t.Status, "
+                   + "ts.SeatNumber, ts.DepartureDate, "
+                   + "f.FlightNumber, f.Airline_Name, f.DepartureAirport, f.ArrivalAirport "
+                   + "FROM Ticket t "
+                   + "JOIN TicketSegment ts ON t.TicketID = ts.TicketID "
+                   + "JOIN Flight f ON ts.FlightID = f.FlightID "
+                   + "WHERE t.AccountID = ? "
+                   + "ORDER BY ts.DepartureDate DESC";
+
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    bookingsTableModel.addRow(new Object[]{
+                        rs.getString("TicketID"),
+                        rs.getString("TicketType"),
+                        rs.getString("FlightClass"),
+                        rs.getString("Status"),
+                        rs.getString("SeatNumber"),
+                        rs.getDate("DepartureDate"),
+                        rs.getInt("FlightNumber"),
+                        rs.getString("Airline_Name"),
+                        rs.getString("DepartureAirport"),
+                        rs.getString("ArrivalAirport")
+                    });
+                }
+            }
+        } catch (SQLException e) {
+            msg.setText("Unable to load bookings: " + e.getMessage());
         }
     }
 
