@@ -11,6 +11,10 @@ GRANT ALL PRIVILEGES ON reservation_system.* TO 'test'@'localhost';
 FLUSH PRIVILEGES;
 
 /* drop all tables incase they need to be updated */
+DROP TRIGGER IF EXISTS trg_flight_distinct_airports_bi;
+DROP TRIGGER IF EXISTS trg_flight_distinct_airports_bu;
+DROP TRIGGER IF EXISTS trg_ticket_distinct_airports_bi;
+DROP TRIGGER IF EXISTS trg_ticket_distinct_airports_bu;
 DROP TABLE IF EXISTS FlightWaitlist;
 DROP TABLE IF EXISTS TicketSegment;
 DROP TABLE IF EXISTS Ticket;
@@ -80,7 +84,6 @@ CREATE TABLE Flight (
     AircraftID VARCHAR(50) NOT NULL,
     BaseFare DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     CONSTRAINT chk_flight_times CHECK (ArrivalTime > DepartureTime),
-    CONSTRAINT chk_distinct_airports CHECK (DepartureAirport <> ArrivalAirport),
     CONSTRAINT uq_flight_number_per_airline UNIQUE (AirlineID, FlightNumber),
     CONSTRAINT fk_flight_airline FOREIGN KEY (AirlineID) REFERENCES AirlineCompany(AirlineID)
         ON UPDATE CASCADE
@@ -132,7 +135,6 @@ CREATE TABLE Ticket (
     Status ENUM('booked', 'changed', 'cancelled', 'completed') NOT NULL DEFAULT 'booked',
     CustomerID INT NOT NULL,
     AccountID VARCHAR(50) NOT NULL,
-    CONSTRAINT chk_ticket_airports CHECK (FromAirport <> ToAirport),
     CONSTRAINT chk_ticket_fares CHECK (BookingFee >= 0.00 AND TotalFare >= 0.00),
     CONSTRAINT fk_ticket_from_airport FOREIGN KEY (FromAirport) REFERENCES Airport(AirportCode)
         ON UPDATE CASCADE
@@ -183,3 +185,43 @@ CREATE TABLE FlightWaitlist (
         ON UPDATE CASCADE
         ON DELETE CASCADE
 );
+
+DELIMITER $$
+
+CREATE TRIGGER trg_flight_distinct_airports_bi
+BEFORE INSERT ON Flight
+FOR EACH ROW
+BEGIN
+    IF NEW.DepartureAirport = NEW.ArrivalAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'DepartureAirport and ArrivalAirport must be different';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_flight_distinct_airports_bu
+BEFORE UPDATE ON Flight
+FOR EACH ROW
+BEGIN
+    IF NEW.DepartureAirport = NEW.ArrivalAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'DepartureAirport and ArrivalAirport must be different';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_ticket_distinct_airports_bi
+BEFORE INSERT ON Ticket
+FOR EACH ROW
+BEGIN
+    IF NEW.FromAirport = NEW.ToAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'FromAirport and ToAirport must be different';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_ticket_distinct_airports_bu
+BEFORE UPDATE ON Ticket
+FOR EACH ROW
+BEGIN
+    IF NEW.FromAirport = NEW.ToAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'FromAirport and ToAirport must be different';
+    END IF;
+END$$
+
+DELIMITER ;
