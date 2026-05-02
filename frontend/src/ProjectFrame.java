@@ -1,9 +1,7 @@
 import java.sql.*;
 import java.awt.*;
 import java.awt.event.*;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -16,9 +14,18 @@ public class ProjectFrame extends JFrame {
     JLabel loginStatus;
     JLabel dashboardHeader;
     JLabel customerInfoLabel;
+    JLabel dashboardStatus;
+    JLabel bookingFlightInfo;
+    JComboBox<String> cbBookingTicketType;
+    JComboBox<String> cbBookingClass;
+    JComboBox<String> cbBookingSeat;
+    JComboBox<String> cbBookingMeal;
+    long bookingFlightId;
+    String bookingFrom, bookingTo, bookingDepDate;
+    JLabel confirmTicketId;
+    JLabel confirmDetails;
     JComboBox<String> cbFrom, cbTo;
-    JSpinner dateSpinner;
-    JCheckBox chkAnyDate;
+    JTextField tfDate;
     JTable flightTable;
     List<Long> flightRowIds = new ArrayList<>();
     DefaultTableModel flightTableModel;
@@ -198,6 +205,8 @@ public class ProjectFrame extends JFrame {
         rootPanel = new JPanel(cardLayout);
         rootPanel.add(loginPanel, "login");
         rootPanel.add(dashboardPanel, "dashboard");
+        rootPanel.add(buildBookingPanel(), "booking");
+        rootPanel.add(buildConfirmationPanel(), "confirmation");
 
         // -- Add the mainPanel to our JForm and set up basic attributes
         this.add(rootPanel);
@@ -229,10 +238,15 @@ public class ProjectFrame extends JFrame {
             }
         });
 
+        dashboardStatus = new JLabel(" ");
+        dashboardStatus.setFont(new Font("Lucida Sans", Font.ITALIC, 13));
+        dashboardStatus.setForeground(Color.RED);
+
         JPanel dashboardTop = new JPanel(new BorderLayout(10, 10));
         dashboardTop.setOpaque(false);
         dashboardTop.add(dashboardHeader, BorderLayout.CENTER);
         dashboardTop.add(btnLogout, BorderLayout.EAST);
+        dashboardTop.add(dashboardStatus, BorderLayout.SOUTH);
 
         JPanel customerPanel = new JPanel(new BorderLayout());
         customerPanel.setOpaque(false);
@@ -294,56 +308,33 @@ public class ProjectFrame extends JFrame {
         cbFrom.setFont(fieldFont);
         cbTo.setFont(fieldFont);
 
-        SpinnerDateModel dateModel = new SpinnerDateModel();
-        dateSpinner = new JSpinner(dateModel);
-        JSpinner.DateEditor dateEditor = new JSpinner.DateEditor(dateSpinner, "yyyy-MM-dd");
-        dateSpinner.setEditor(dateEditor);
-        dateSpinner.setFont(fieldFont);
-        dateSpinner.setEnabled(false);
-
-        chkAnyDate = new JCheckBox("Any Date");
-        chkAnyDate.setSelected(true);
-        chkAnyDate.setOpaque(false);
-        chkAnyDate.setFont(fieldFont);
-        chkAnyDate.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                dateSpinner.setEnabled(!chkAnyDate.isSelected());
-            }
-        });
-
-        JPanel datePanel = new JPanel(new BorderLayout(4, 0));
-        datePanel.setOpaque(false);
-        datePanel.add(dateSpinner, BorderLayout.CENTER);
-        datePanel.add(chkAnyDate, BorderLayout.EAST);
+        tfDate = new JTextField();
+        tfDate.setFont(fieldFont);
+        tfDate.setToolTipText("Enter date as yyyy-MM-dd, or leave blank for all dates");
 
         JPanel searchPanel = new JPanel(new GridLayout(2, 4, 8, 8));
         searchPanel.setOpaque(false);
         searchPanel.setBorder(BorderFactory.createTitledBorder("Explore Flights"));
         JLabel lbFrom = new JLabel("From Airport");
         JLabel lbTo = new JLabel("To Airport");
-        JLabel lbDate = new JLabel("Departure Date");
+        JLabel lbDate = new JLabel("Date (yyyy-MM-dd or blank)");
         JLabel lbBlank = new JLabel();
         JButton btnSearchFlights = new JButton("Search Flights");
 
         lbFrom.setFont(fieldFont);
         lbTo.setFont(fieldFont);
-        lbDate.setFont(fieldFont);
+        lbDate.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
         btnSearchFlights.setFont(new Font("Lucida Sans", Font.BOLD, 14));
 
         btnSearchFlights.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
+                dashboardStatus.setText(" ");
                 String fromSel = cbFrom.getSelectedItem().toString();
                 String toSel = cbTo.getSelectedItem().toString();
                 String fromCode = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
                 String toCode = toSel.equals("Any") ? "" : toSel.substring(0, 3);
-                String dateStr = "";
-                if (!chkAnyDate.isSelected()) {
-                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
-                    dateStr = sdf.format((Date) dateSpinner.getValue());
-                }
-                loadFlights(fromCode, toCode, dateStr);
+                loadFlights(fromCode, toCode, tfDate.getText().trim());
             }
         });
 
@@ -353,7 +344,7 @@ public class ProjectFrame extends JFrame {
         searchPanel.add(lbBlank);
         searchPanel.add(cbFrom);
         searchPanel.add(cbTo);
-        searchPanel.add(datePanel);
+        searchPanel.add(tfDate);
         searchPanel.add(btnSearchFlights);
 
         flightTableModel = new DefaultTableModel(
@@ -500,124 +491,29 @@ public class ProjectFrame extends JFrame {
                 }
             }
         } catch (SQLException e) {
-            msg.setText("Unable to load flights: " + e.getMessage());
+            e.printStackTrace();
+            dashboardStatus.setText("Error loading flights: " + e.getMessage());
         }
     }
 
     private void showBookingForm(int rowIndex) {
-        long flightId   = flightRowIds.get(rowIndex);
-        int  flightNum  = (Integer) flightTableModel.getValueAt(rowIndex, 0);
-        String airline  = (String)  flightTableModel.getValueAt(rowIndex, 1);
-        String from     = (String)  flightTableModel.getValueAt(rowIndex, 2);
-        String to       = (String)  flightTableModel.getValueAt(rowIndex, 3);
-        String dep      = flightTableModel.getValueAt(rowIndex, 4).toString();
+        bookingFlightId = flightRowIds.get(rowIndex);
+        int    flightNum = (Integer) flightTableModel.getValueAt(rowIndex, 0);
+        String airline   = (String)  flightTableModel.getValueAt(rowIndex, 1);
+        bookingFrom      = (String)  flightTableModel.getValueAt(rowIndex, 2);
+        bookingTo        = (String)  flightTableModel.getValueAt(rowIndex, 3);
+        String dep       = flightTableModel.getValueAt(rowIndex, 4).toString();
+        bookingDepDate   = dep.length() >= 10 ? dep.substring(0, 10) : dep;
 
-        JDialog dialog = new JDialog(this, "Book Flight", true);
-        dialog.setLayout(new BorderLayout(10, 10));
-        dialog.setSize(440, 300);
-        dialog.setLocationRelativeTo(this);
+        bookingFlightInfo.setText("<html><b>Flight " + flightNum + "</b> &nbsp;&middot;&nbsp; "
+                + airline + "<br/>" + bookingFrom + " &rarr; " + bookingTo
+                + " &nbsp;&middot;&nbsp; Departure: " + dep + "</html>");
 
-        Font dlgFont = new Font("Lucida Sans", Font.PLAIN, 14);
-
-        JLabel infoLabel = new JLabel("<html><b>Flight " + flightNum + "</b> · " + airline
-                + "<br/>" + from + " → " + to + " · Dep: " + dep + "</html>");
-        infoLabel.setFont(dlgFont);
-        infoLabel.setBorder(BorderFactory.createTitledBorder("Selected Flight"));
-
-        JComboBox<String> cbTicketType = new JComboBox<>(new String[]{"one_way", "round_trip"});
-        JComboBox<String> cbClass      = new JComboBox<>(new String[]{"economy", "business", "first"});
-        JTextField tfSeat = new JTextField();
-        JTextField tfMeal = new JTextField();
-        cbTicketType.setFont(dlgFont); cbClass.setFont(dlgFont);
-        tfSeat.setFont(dlgFont);       tfMeal.setFont(dlgFont);
-
-        JPanel formPanel = new JPanel(new GridLayout(4, 2, 8, 6));
-        formPanel.setBorder(BorderFactory.createEmptyBorder(6, 10, 6, 10));
-        for (String lbl : new String[]{"Ticket Type", "Class", "Seat Number", "Special Meal"}) {
-            JLabel l = new JLabel(lbl); l.setFont(dlgFont); formPanel.add(l);
-            if (lbl.equals("Ticket Type")) formPanel.add(cbTicketType);
-            else if (lbl.equals("Class"))  formPanel.add(cbClass);
-            else if (lbl.equals("Seat Number")) formPanel.add(tfSeat);
-            else formPanel.add(tfMeal);
-        }
-
-        JButton btnConfirm = new JButton("Confirm Booking");
-        JButton btnCancel  = new JButton("Cancel");
-        btnConfirm.setFont(new Font("Lucida Sans", Font.BOLD, 14));
-        btnCancel.setFont(dlgFont);
-        JPanel btnPanel = new JPanel(new GridLayout(1, 2, 8, 0));
-        btnPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 8, 10));
-        btnPanel.add(btnConfirm); btnPanel.add(btnCancel);
-
-        btnCancel.addActionListener(new ActionListener() {
-            @Override public void actionPerformed(ActionEvent e) { dialog.dispose(); }
-        });
-
-        btnConfirm.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                String lookupSql = "SELECT AccountID, CustomerID FROM Account WHERE AccountID = ?";
-                try (PreparedStatement ps = con.prepareStatement(lookupSql)) {
-                    ps.setString(1, user);
-                    ResultSet rs = ps.executeQuery();
-                    if (!rs.next()) {
-                        JOptionPane.showMessageDialog(dialog,
-                            "No customer profile found for '" + user + "'.\nContact an admin to set one up.",
-                            "Profile Not Found", JOptionPane.WARNING_MESSAGE);
-                        return;
-                    }
-                    String accountId  = rs.getString("AccountID");
-                    int    customerId = rs.getInt("CustomerID");
-                    String depDate    = dep.length() >= 10 ? dep.substring(0, 10) : dep;
-                    String ticketId   = "TKT-" + System.currentTimeMillis();
-                    long   ticketNum  = System.currentTimeMillis();
-                    String seatNum    = tfSeat.getText().trim().isEmpty() ? null : tfSeat.getText().trim();
-                    String meal       = tfMeal.getText().trim().isEmpty() ? null : tfMeal.getText().trim();
-
-                    String insTicket = "INSERT INTO Ticket "
-                        + "(TicketID, TicketNumber, TicketType, FlightClass, BookingFee, TotalFare, "
-                        + "Flexibility, FromAirport, ToAirport, IsPaid, Status, CustomerID, AccountID) "
-                        + "VALUES (?, ?, ?, ?, 0.00, 0.00, FALSE, ?, ?, FALSE, 'booked', ?, ?)";
-                    try (PreparedStatement psT = con.prepareStatement(insTicket)) {
-                        psT.setString(1, ticketId);
-                        psT.setLong(2, ticketNum);
-                        psT.setString(3, cbTicketType.getSelectedItem().toString());
-                        psT.setString(4, cbClass.getSelectedItem().toString());
-                        psT.setString(5, from);
-                        psT.setString(6, to);
-                        psT.setInt(7, customerId);
-                        psT.setString(8, accountId);
-                        psT.executeUpdate();
-                    }
-
-                    String insSeg = "INSERT INTO TicketSegment "
-                        + "(TicketID, SegmentOrder, FlightID, DepartureDate, SeatNumber, SpecialMeal, SegmentFare) "
-                        + "VALUES (?, 1, ?, ?, ?, ?, 0.00)";
-                    try (PreparedStatement psS = con.prepareStatement(insSeg)) {
-                        psS.setString(1, ticketId);
-                        psS.setLong(2, flightId);
-                        psS.setString(3, depDate);
-                        psS.setString(4, seatNum);
-                        psS.setString(5, meal);
-                        psS.executeUpdate();
-                    }
-
-                    JOptionPane.showMessageDialog(dialog,
-                        "Booking confirmed!\nTicket ID: " + ticketId,
-                        "Booking Confirmed", JOptionPane.INFORMATION_MESSAGE);
-                    dialog.dispose();
-                } catch (SQLException ex) {
-                    JOptionPane.showMessageDialog(dialog,
-                        "Booking failed: " + ex.getMessage(),
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                }
-            }
-        });
-
-        dialog.add(infoLabel,  BorderLayout.NORTH);
-        dialog.add(formPanel,  BorderLayout.CENTER);
-        dialog.add(btnPanel,   BorderLayout.SOUTH);
-        dialog.setVisible(true);
+        cbBookingTicketType.setSelectedIndex(0);
+        cbBookingClass.setSelectedIndex(0);
+        cbBookingMeal.setSelectedIndex(0);
+        loadSeatOptions(bookingFlightId);
+        cardLayout.show(rootPanel, "booking");
     }
 
     private void loadMyBookings() {
@@ -652,8 +548,242 @@ public class ProjectFrame extends JFrame {
                 }
             }
         } catch (SQLException e) {
-            msg.setText("Unable to load bookings: " + e.getMessage());
+            e.printStackTrace();
+            dashboardStatus.setText("Error loading bookings: " + e.getMessage());
         }
+    }
+
+    private JPanel buildBookingPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        panel.setBackground(new Color(242, 240, 230));
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        JButton btnBack = new JButton("← Back to Flights");
+        btnBack.setFont(fieldFont);
+        btnBack.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cardLayout.show(rootPanel, "dashboard");
+            }
+        });
+
+        JLabel title = new JLabel("Book a Flight");
+        title.setFont(new Font("Lucida Sans", Font.BOLD, 20));
+
+        JPanel topPanel = new JPanel(new BorderLayout(10, 0));
+        topPanel.setOpaque(false);
+        topPanel.add(btnBack, BorderLayout.WEST);
+        topPanel.add(title, BorderLayout.CENTER);
+
+        bookingFlightInfo = new JLabel(" ");
+        bookingFlightInfo.setFont(fieldFont);
+        bookingFlightInfo.setBorder(BorderFactory.createTitledBorder("Selected Flight"));
+
+        cbBookingTicketType = new JComboBox<>(new String[]{"one_way", "round_trip"});
+        cbBookingClass      = new JComboBox<>(new String[]{"economy", "business", "first"});
+        cbBookingSeat       = new JComboBox<>();
+        cbBookingMeal       = new JComboBox<>(new String[]{
+            "None", "Vegetarian", "Vegan", "Kosher",
+            "Halal", "Gluten-Free", "Low-Sodium", "Child Meal"
+        });
+        cbBookingTicketType.setFont(fieldFont);
+        cbBookingClass.setFont(fieldFont);
+        cbBookingSeat.setFont(fieldFont);
+        cbBookingMeal.setFont(fieldFont);
+
+        JPanel formPanel = new JPanel(new GridLayout(4, 2, 10, 12));
+        formPanel.setOpaque(false);
+        formPanel.setBorder(BorderFactory.createTitledBorder("Booking Details"));
+        String[] labels = {"Ticket Type", "Class", "Seat Number", "Special Meal"};
+        JComponent[] fields = {cbBookingTicketType, cbBookingClass, cbBookingSeat, cbBookingMeal};
+        for (int i = 0; i < labels.length; i++) {
+            JLabel lbl = new JLabel(labels[i]);
+            lbl.setFont(fieldFont);
+            formPanel.add(lbl);
+            formPanel.add(fields[i]);
+        }
+
+        JButton btnConfirm = new JButton("Confirm Booking");
+        btnConfirm.setFont(new Font("Lucida Sans", Font.BOLD, 16));
+        btnConfirm.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { confirmBooking(); }
+        });
+
+        JPanel centerPanel = new JPanel();
+        centerPanel.setOpaque(false);
+        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+        bookingFlightInfo.setAlignmentX(Component.LEFT_ALIGNMENT);
+        formPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnConfirm.setAlignmentX(Component.LEFT_ALIGNMENT);
+        centerPanel.add(bookingFlightInfo);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 12)));
+        centerPanel.add(formPanel);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 16)));
+        centerPanel.add(btnConfirm);
+
+        panel.add(topPanel, BorderLayout.NORTH);
+        panel.add(centerPanel, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private void loadSeatOptions(long flightId) {
+        cbBookingSeat.removeAllItems();
+        cbBookingSeat.addItem("No Preference");
+        String sql = "SELECT ac.SeatCapacity FROM Aircraft ac "
+                   + "JOIN Flight f ON ac.AircraftID = f.AircraftID WHERE f.FlightID = ?";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, flightId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                int capacity = rs.getInt("SeatCapacity");
+                int rows = (int) Math.ceil(capacity / 6.0);
+                String[] letters = {"A", "B", "C", "D", "E", "F"};
+                int count = 0;
+                outer:
+                for (int r = 1; r <= rows; r++) {
+                    for (String l : letters) {
+                        cbBookingSeat.addItem(r + l);
+                        if (++count >= capacity) break outer;
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            dashboardStatus.setText("Could not load seat options: " + e.getMessage());
+        }
+    }
+
+    private void confirmBooking() {
+        String lookupSql = "SELECT AccountID, CustomerID FROM Account WHERE AccountID = ?";
+        try (PreparedStatement ps = con.prepareStatement(lookupSql)) {
+            ps.setString(1, user);
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) {
+                JOptionPane.showMessageDialog(this,
+                    "No customer profile found for '" + user + "'.\nContact an admin.",
+                    "Profile Not Found", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            String accountId  = rs.getString("AccountID");
+            int    customerId = rs.getInt("CustomerID");
+            String ticketId   = "TKT-" + System.currentTimeMillis();
+            long   ticketNum  = System.currentTimeMillis();
+            String seatSel    = cbBookingSeat.getSelectedItem().toString();
+            String seatNum    = seatSel.equals("No Preference") ? null : seatSel;
+            String mealSel    = cbBookingMeal.getSelectedItem().toString();
+            String meal       = mealSel.equals("None") ? null : mealSel;
+
+            String insTicket = "INSERT INTO Ticket "
+                + "(TicketID, TicketNumber, TicketType, FlightClass, BookingFee, TotalFare, "
+                + "Flexibility, FromAirport, ToAirport, IsPaid, Status, CustomerID, AccountID) "
+                + "VALUES (?, ?, ?, ?, 0.00, 0.00, FALSE, ?, ?, FALSE, 'booked', ?, ?)";
+            try (PreparedStatement psT = con.prepareStatement(insTicket)) {
+                psT.setString(1, ticketId);
+                psT.setLong(2, ticketNum);
+                psT.setString(3, cbBookingTicketType.getSelectedItem().toString());
+                psT.setString(4, cbBookingClass.getSelectedItem().toString());
+                psT.setString(5, bookingFrom);
+                psT.setString(6, bookingTo);
+                psT.setInt(7, customerId);
+                psT.setString(8, accountId);
+                psT.executeUpdate();
+            }
+
+            String insSeg = "INSERT INTO TicketSegment "
+                + "(TicketID, SegmentOrder, FlightID, DepartureDate, SeatNumber, SpecialMeal, SegmentFare) "
+                + "VALUES (?, 1, ?, ?, ?, ?, 0.00)";
+            try (PreparedStatement psS = con.prepareStatement(insSeg)) {
+                psS.setString(1, ticketId);
+                psS.setLong(2, bookingFlightId);
+                psS.setString(3, bookingDepDate);
+                psS.setString(4, seatNum);
+                psS.setString(5, meal);
+                psS.executeUpdate();
+            }
+
+            confirmTicketId.setText("Ticket ID: " + ticketId);
+            String seatDisplay = (seatNum != null) ? seatNum : "No Preference";
+            String mealDisplay = (meal  != null) ? meal  : "None";
+            confirmDetails.setText("<html>"
+                + "<b>Flight:</b> " + bookingFrom + " &rarr; " + bookingTo + " &nbsp;|&nbsp; " + bookingDepDate + "<br/>"
+                + "<b>Class:</b> " + cbBookingClass.getSelectedItem() + "<br/>"
+                + "<b>Seat:</b> " + seatDisplay + "<br/>"
+                + "<b>Special Meal:</b> " + mealDisplay
+                + "</html>");
+            cardLayout.show(rootPanel, "confirmation");
+        } catch (SQLException ex) {
+            ex.printStackTrace();
+            if (ex.getErrorCode() == 1062) {
+                JOptionPane.showMessageDialog(this,
+                    "Seat " + cbBookingSeat.getSelectedItem() + " on this flight is already taken.\nPlease choose a different seat.",
+                    "Seat Unavailable", JOptionPane.WARNING_MESSAGE);
+            } else {
+                JOptionPane.showMessageDialog(this,
+                    "Booking failed: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private JPanel buildConfirmationPanel() {
+        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        panel.setBorder(BorderFactory.createEmptyBorder(40, 40, 40, 40));
+        panel.setBackground(new Color(242, 240, 230));
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 15);
+
+        JLabel title = new JLabel("Booking Confirmed!");
+        title.setFont(new Font("Lucida Sans", Font.BOLD, 24));
+        title.setForeground(new Color(0, 140, 0));
+
+        confirmTicketId = new JLabel(" ");
+        confirmTicketId.setFont(new Font("Lucida Sans", Font.BOLD, 16));
+        confirmTicketId.setBorder(BorderFactory.createTitledBorder("Ticket ID"));
+
+        confirmDetails = new JLabel(" ");
+        confirmDetails.setFont(fieldFont);
+        confirmDetails.setBorder(BorderFactory.createTitledBorder("Booking Details"));
+
+        JButton btnFlights = new JButton("Search More Flights");
+        JButton btnBookings = new JButton("View My Bookings");
+        btnFlights.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnBookings.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
+
+        btnFlights.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cardLayout.show(rootPanel, "dashboard");
+            }
+        });
+        btnBookings.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                loadMyBookings();
+                cardLayout.show(rootPanel, "dashboard");
+            }
+        });
+
+        JPanel btnRow = new JPanel(new GridLayout(1, 2, 12, 0));
+        btnRow.setOpaque(false);
+        btnRow.add(btnFlights);
+        btnRow.add(btnBookings);
+
+        JPanel centerPanel = new JPanel();
+        centerPanel.setOpaque(false);
+        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        confirmTicketId.setAlignmentX(Component.LEFT_ALIGNMENT);
+        confirmDetails.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        centerPanel.add(title);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 20)));
+        centerPanel.add(confirmTicketId);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 12)));
+        centerPanel.add(confirmDetails);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 24)));
+        centerPanel.add(btnRow);
+
+        panel.add(centerPanel, BorderLayout.CENTER);
+        return panel;
     }
 
     public static void main(String[] args) throws Exception {
