@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS Aircraft (
     AirlineModel VARCHAR(100) NOT NULL,
     SeatCapacity INT NOT NULL,
     AirlineID CHAR(2) NOT NULL,
+    CONSTRAINT chk_aircraft_capacity CHECK (SeatCapacity > 0),
     CONSTRAINT fk_airline FOREIGN KEY (AirlineID) REFERENCES AirlineCompany(AirlineID)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS Flight (
     ArrivalAirport CHAR(3) NOT NULL,
     AircraftID VARCHAR(50) NOT NULL,
     BaseFare DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    CONSTRAINT chk_flight_times CHECK (ArrivalTime > DepartureTime),
     CONSTRAINT uq_flight_number_per_airline UNIQUE (AirlineID, FlightNumber),
     CONSTRAINT fk_flight_airline FOREIGN KEY (AirlineID) REFERENCES AirlineCompany(AirlineID)
         ON UPDATE CASCADE
@@ -116,6 +118,7 @@ CREATE TABLE IF NOT EXISTS Ticket (
     Status ENUM('booked', 'changed', 'cancelled', 'completed') NOT NULL DEFAULT 'booked',
     CustomerID INT NOT NULL,
     AccountID VARCHAR(50) NOT NULL,
+    CONSTRAINT chk_ticket_fares CHECK (BookingFee >= 0.00 AND TotalFare >= 0.00),
     CONSTRAINT fk_ticket_from_airport FOREIGN KEY (FromAirport) REFERENCES Airport(AirportCode)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
@@ -140,6 +143,8 @@ CREATE TABLE IF NOT EXISTS TicketSegment (
     SpecialMeal VARCHAR(100),
     SegmentFare DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     PRIMARY KEY (TicketID, SegmentOrder),
+    CONSTRAINT chk_segment_order CHECK (SegmentOrder > 0),
+    CONSTRAINT chk_segment_fare CHECK (SegmentFare >= 0.00),
     CONSTRAINT fk_segment_ticket FOREIGN KEY (TicketID) REFERENCES Ticket(TicketID)
         ON UPDATE CASCADE
         ON DELETE CASCADE,
@@ -163,3 +168,43 @@ CREATE TABLE IF NOT EXISTS FlightWaitlist (
         ON UPDATE CASCADE
         ON DELETE CASCADE
 );
+
+DELIMITER $$
+
+CREATE TRIGGER trg_flight_distinct_airports_bi
+BEFORE INSERT ON Flight
+FOR EACH ROW
+BEGIN
+    IF NEW.DepartureAirport = NEW.ArrivalAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'DepartureAirport and ArrivalAirport must be different';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_flight_distinct_airports_bu
+BEFORE UPDATE ON Flight
+FOR EACH ROW
+BEGIN
+    IF NEW.DepartureAirport = NEW.ArrivalAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'DepartureAirport and ArrivalAirport must be different';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_ticket_distinct_airports_bi
+BEFORE INSERT ON Ticket
+FOR EACH ROW
+BEGIN
+    IF NEW.FromAirport = NEW.ToAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'FromAirport and ToAirport must be different';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_ticket_distinct_airports_bu
+BEFORE UPDATE ON Ticket
+FOR EACH ROW
+BEGIN
+    IF NEW.FromAirport = NEW.ToAirport THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'FromAirport and ToAirport must be different';
+    END IF;
+END$$
+
+DELIMITER ;
