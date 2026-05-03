@@ -1,6 +1,6 @@
 -- Active: 1776748666822@@127.0.0.1@3306@reservation_system
-/* LOGIN SCHEMA - temporary until we add relational schema from ER digram */
-/*note for self: might have to wipe out existing tables on local mysql server */
+-- Safe to re-run: uses CREATE TABLE IF NOT EXISTS so existing data is never dropped.
+-- To wipe all data and start fresh, run reset.sql first, then this file, then seed.sql.
 CREATE DATABASE IF NOT EXISTS reservation_system;
 USE reservation_system;
 
@@ -10,20 +10,7 @@ ALTER USER 'test'@'localhost' IDENTIFIED BY 'group16';
 GRANT ALL PRIVILEGES ON reservation_system.* TO 'test'@'localhost';
 FLUSH PRIVILEGES;
 
-/* drop all tables incase they need to be updated */
-DROP TABLE IF EXISTS FlightWaitlist;
-DROP TABLE IF EXISTS TicketSegment;
-DROP TABLE IF EXISTS Ticket;
-DROP TABLE IF EXISTS FlightOperatingDay;
-DROP TABLE IF EXISTS Account;
-DROP TABLE IF EXISTS Flight;
-DROP TABLE IF EXISTS Aircraft;
-DROP TABLE IF EXISTS Airport;
-DROP TABLE IF EXISTS Customer;
-DROP TABLE IF EXISTS AirlineCompany;
-DROP TABLE IF EXISTS users;
-
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     user VARCHAR(100) PRIMARY KEY,
     password VARCHAR(255) NOT NULL,
     role ENUM('admin', 'rep', 'customer') NOT NULL,
@@ -33,20 +20,20 @@ CREATE TABLE users (
 /* Airline Reservation System Schema (can be changed in the future) */
 
 -- 1. AirlineCompany Table
-CREATE TABLE AirlineCompany (
+CREATE TABLE IF NOT EXISTS AirlineCompany (
     AirlineID CHAR(2) PRIMARY KEY,
     AirlineName VARCHAR(255) NOT NULL UNIQUE
 );
 
 -- 2. Airport Table
-CREATE TABLE Airport (
+CREATE TABLE IF NOT EXISTS Airport (
     AirportCode CHAR(3) PRIMARY KEY,
     AirportName VARCHAR(100) NOT NULL,
     Location VARCHAR(255) NOT NULL
 );
 
 -- 3. Customer Table
-CREATE TABLE Customer (
+CREATE TABLE IF NOT EXISTS Customer (
     CustomerID INT AUTO_INCREMENT PRIMARY KEY,
     FirstName VARCHAR(100) NOT NULL,
     LastName VARCHAR(100) NOT NULL,
@@ -55,7 +42,7 @@ CREATE TABLE Customer (
 );
 
 -- 4. Aircraft Table
-CREATE TABLE Aircraft (
+CREATE TABLE IF NOT EXISTS Aircraft (
     AircraftID VARCHAR(50) PRIMARY KEY,
     AirlineModel VARCHAR(100) NOT NULL,
     SeatCapacity INT NOT NULL,
@@ -66,7 +53,7 @@ CREATE TABLE Aircraft (
 );
 
 -- 5. Flight Table
-CREATE TABLE Flight (
+CREATE TABLE IF NOT EXISTS Flight (
     FlightID BIGINT AUTO_INCREMENT PRIMARY KEY,
     FlightNumber INT NOT NULL,
     AirlineID CHAR(2) NOT NULL,
@@ -94,7 +81,7 @@ CREATE TABLE Flight (
 );
 
 -- 5a. Operating days for recurring flights
-CREATE TABLE FlightOperatingDay (
+CREATE TABLE IF NOT EXISTS FlightOperatingDay (
     FlightID BIGINT NOT NULL,
     DayOfWeek ENUM('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun') NOT NULL,
     PRIMARY KEY (FlightID, DayOfWeek),
@@ -104,7 +91,7 @@ CREATE TABLE FlightOperatingDay (
 );
 
 -- 6. Account Table
-CREATE TABLE Account (
+CREATE TABLE IF NOT EXISTS Account (
     AccountID VARCHAR(50) PRIMARY KEY,
     CustomerID INT NOT NULL UNIQUE,
     CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -114,7 +101,7 @@ CREATE TABLE Account (
 );
 
 -- 7. Ticket Table (one ticket per passenger reservation)
-CREATE TABLE Ticket (
+CREATE TABLE IF NOT EXISTS Ticket (
     TicketID VARCHAR(50) PRIMARY KEY,
     TicketNumber BIGINT NOT NULL UNIQUE,
     TicketType ENUM('one_way', 'round_trip') NOT NULL,
@@ -144,7 +131,7 @@ CREATE TABLE Ticket (
 );
 
 -- 7a. Ticket to Flight segments (supports direct and multi-leg itineraries)
-CREATE TABLE TicketSegment (
+CREATE TABLE IF NOT EXISTS TicketSegment (
     TicketID VARCHAR(50) NOT NULL,
     SegmentOrder INT NOT NULL,
     FlightID BIGINT NOT NULL,
@@ -163,7 +150,7 @@ CREATE TABLE TicketSegment (
 );
 
 -- 8. FlightWaitlist Table
-CREATE TABLE FlightWaitlist (
+CREATE TABLE IF NOT EXISTS FlightWaitlist (
     WaitlistID BIGINT AUTO_INCREMENT PRIMARY KEY,
     FlightID BIGINT NOT NULL,
     CustomerID INT NOT NULL,

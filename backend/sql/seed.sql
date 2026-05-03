@@ -57,6 +57,62 @@ VALUES
     (400, 'WN', 'Southwest Airlines', 'domestic', '2026-05-04 10:00:00', '2026-05-04 13:30:00', 'DFW', 'MIA', 'WN-001', 150.00),
     (500, 'B6', 'JetBlue Airways',    'domestic', '2026-05-05 06:00:00', '2026-05-05 11:30:00', 'BOS', 'SEA', 'B6-001', 280.00);
 
+-- FlightOperatingDay — recurring schedule for each flight
+-- Uses subquery on FlightNumber+AirlineID so IDs don't need to be hardcoded
+INSERT IGNORE INTO FlightOperatingDay (FlightID, DayOfWeek)
+-- DL 100 (ATL→JFK): Mon / Wed / Fri
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Wed' UNION ALL SELECT 'Fri') d
+    WHERE f.FlightNumber = 100 AND f.AirlineID = 'DL'
+UNION ALL
+-- DL 101 (JFK→ATL): Mon / Wed / Fri  (return leg mirrors outbound)
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Wed' UNION ALL SELECT 'Fri') d
+    WHERE f.FlightNumber = 101 AND f.AirlineID = 'DL'
+UNION ALL
+-- DL 102 (ATL→LAX): Tue / Thu / Sat
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Tue' AS day UNION ALL SELECT 'Thu' UNION ALL SELECT 'Sat') d
+    WHERE f.FlightNumber = 102 AND f.AirlineID = 'DL'
+UNION ALL
+-- AA 200 (LAX→ORD): Mon–Fri (weekdays)
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Tue' UNION ALL SELECT 'Wed'
+          UNION ALL SELECT 'Thu' UNION ALL SELECT 'Fri') d
+    WHERE f.FlightNumber = 200 AND f.AirlineID = 'AA'
+UNION ALL
+-- AA 201 (ORD→LAX): Mon–Fri (return)
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Tue' UNION ALL SELECT 'Wed'
+          UNION ALL SELECT 'Thu' UNION ALL SELECT 'Fri') d
+    WHERE f.FlightNumber = 201 AND f.AirlineID = 'AA'
+UNION ALL
+-- AA 202 (JFK→MIA): Wed / Sat / Sun
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Wed' AS day UNION ALL SELECT 'Sat' UNION ALL SELECT 'Sun') d
+    WHERE f.FlightNumber = 202 AND f.AirlineID = 'AA'
+UNION ALL
+-- UA 300 (SFO→DEN): Mon / Fri / Sun
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Fri' UNION ALL SELECT 'Sun') d
+    WHERE f.FlightNumber = 300 AND f.AirlineID = 'UA'
+UNION ALL
+-- UA 301 (DEN→SFO): Mon / Fri / Sun  (return)
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Fri' UNION ALL SELECT 'Sun') d
+    WHERE f.FlightNumber = 301 AND f.AirlineID = 'UA'
+UNION ALL
+-- WN 400 (DFW→MIA): daily
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Mon' AS day UNION ALL SELECT 'Tue' UNION ALL SELECT 'Wed' UNION ALL SELECT 'Thu'
+          UNION ALL SELECT 'Fri' UNION ALL SELECT 'Sat' UNION ALL SELECT 'Sun') d
+    WHERE f.FlightNumber = 400 AND f.AirlineID = 'WN'
+UNION ALL
+-- B6 500 (BOS→SEA): Tue / Thu / Sat
+SELECT f.FlightID, d.day FROM Flight f
+    JOIN (SELECT 'Tue' AS day UNION ALL SELECT 'Thu' UNION ALL SELECT 'Sat') d
+    WHERE f.FlightNumber = 500 AND f.AirlineID = 'B6';
+
 -- Customer and Account for user 'yk564' (allows booking test)
 INSERT IGNORE INTO Customer (CustomerID, FirstName, LastName, Email) VALUES
     (1, 'Yash', 'Kode', 'yashkode@gmail.com');
