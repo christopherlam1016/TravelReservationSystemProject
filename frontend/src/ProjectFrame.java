@@ -29,6 +29,7 @@ public class ProjectFrame extends JFrame {
     JTable flightTable;
     List<Long> flightRowIds = new ArrayList<>();
     DefaultTableModel flightTableModel;
+    JPanel dashboardPanel;
     JPanel bookingsCardsPanel;
     JPanel waitlistCardsPanel;
     JPanel repSection;
@@ -108,17 +109,33 @@ public class ProjectFrame extends JFrame {
                     return;
                 }
 
-                // execute sql insert query for new user information
-                String instruction = "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)";
-                try (PreparedStatement ps = con.prepareStatement(instruction)) {
-                    ps.setString(1, newUser);
-                    ps.setString(2, passwd);
-                    ps.setString(3, "customer");
-                    int result = ps.executeUpdate();
-                    String s = "User " + newUser + " has been added (" + result + ")";
-                    msg.setText(s);
-                } catch (SQLException e1) {
-                    msg.setText("Unable to add new user: " + e1.getMessage());
+                boolean previousAutoCommit = true;
+                try {
+                    previousAutoCommit = con.getAutoCommit();
+                    con.setAutoCommit(false);
+
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)")) {
+                        ps.setString(1, newUser);
+                        ps.setString(2, passwd);
+                        ps.setString(3, "customer");
+                        ps.executeUpdate();
+                    }
+
+                    if (!createCustomerAccountForUser(newUser)) {
+                        con.rollback();
+                        return;
+                    }
+
+                    con.commit();
+                    tfuser.setText("");
+                    tfpasswd.setText("");
+                    msg.setText("User " + newUser + " has been created successfully!");
+                } catch (SQLException ex) {
+                    try { con.rollback(); } catch (SQLException ignored) { }
+                    msg.setText("Unable to add new user: " + ex.getMessage());
+                } finally {
+                    try { con.setAutoCommit(previousAutoCommit); } catch (SQLException ignored) { }
                 }
             }
         });
@@ -243,7 +260,7 @@ public class ProjectFrame extends JFrame {
     }
 
     private JPanel buildDashboardPanel() {
-        JPanel dashboardPanel = new JPanel(new BorderLayout(10, 10));
+        dashboardPanel = new JPanel(new BorderLayout(10, 10));
         dashboardPanel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
         dashboardPanel.setBackground(new Color(242, 240, 230));
 
@@ -697,16 +714,57 @@ public class ProjectFrame extends JFrame {
         JTable allBookingsTable = new JTable(allBookingsTableModel);
         allBookingsTable.setRowHeight(22);
         JScrollPane allBookingsScroll = new JScrollPane(allBookingsTable);
-        allBookingsScroll.setBorder(BorderFactory.createTitledBorder("All Bookings"));
+        allBookingsScroll.setBorder(BorderFactory.createTitledBorder("Reservations"));
         allBookingsScroll.setPreferredSize(new Dimension(800, 160));
         allBookingsScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JButton btnLoadAllBookings = new JButton("Load All Bookings");
+        JTextField tfSearchFlightNum = new JTextField(10);
+        JTextField tfSearchCustomerName = new JTextField(15);
+        tfSearchFlightNum.setFont(fieldFont);
+        tfSearchCustomerName.setFont(fieldFont);
+        tfSearchFlightNum.setToolTipText("Enter flight number");
+        tfSearchCustomerName.setToolTipText("Enter customer first or last name");
+
+        JButton btnLoadAllBookings = new JButton("Load All");
+        JButton btnSearchBookings = new JButton("Search");
+        JButton btnClearSearch = new JButton("Clear");
         btnLoadAllBookings.setFont(fieldFont);
+        btnSearchBookings.setFont(fieldFont);
+        btnClearSearch.setFont(fieldFont);
         btnLoadAllBookings.setAlignmentX(Component.LEFT_ALIGNMENT);
+
         btnLoadAllBookings.addActionListener(new ActionListener() {
             @Override public void actionPerformed(ActionEvent e) { loadAllBookings(); }
         });
+        btnSearchBookings.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { 
+                String flightNum = tfSearchFlightNum.getText().trim();
+                String customerName = tfSearchCustomerName.getText().trim();
+                searchReservations(flightNum, customerName);
+            }
+        });
+        btnClearSearch.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { 
+                tfSearchFlightNum.setText("");
+                tfSearchCustomerName.setText("");
+                loadAllBookings();
+            }
+        });
+
+        JPanel searchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        searchRow.setOpaque(false);
+        searchRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+        searchRow.add(new JLabel("Flight #:"));
+        searchRow.add(tfSearchFlightNum);
+        searchRow.add(new JLabel("Customer Name:"));
+        searchRow.add(tfSearchCustomerName);
+        searchRow.add(btnSearchBookings);
+        searchRow.add(btnClearSearch);
+
+        JPanel bookingsBtnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        bookingsBtnRow.setOpaque(false);
+        bookingsBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        bookingsBtnRow.add(btnLoadAllBookings);
 
         adminSection.add(usersScroll);
         adminSection.add(Box.createRigidArea(new Dimension(0, 4)));
@@ -714,7 +772,8 @@ public class ProjectFrame extends JFrame {
         adminSection.add(Box.createRigidArea(new Dimension(0, 2)));
         adminSection.add(delBtnRow);
         adminSection.add(Box.createRigidArea(new Dimension(0, 10)));
-        adminSection.add(btnLoadAllBookings);
+        adminSection.add(searchRow);
+        adminSection.add(bookingsBtnRow);
         adminSection.add(Box.createRigidArea(new Dimension(0, 4)));
         adminSection.add(allBookingsScroll);
 
@@ -767,6 +826,14 @@ public class ProjectFrame extends JFrame {
         
         infoText.append("</html>");
         customerInfoLabel.setText(infoText.toString());
+        
+        if ("admin".equals(userRole)) {
+            dashboardPanel.setBackground(new Color(255, 200, 200));
+        } else if ("rep".equals(userRole)) {
+            dashboardPanel.setBackground(new Color(200, 220, 255));
+        } else {
+            dashboardPanel.setBackground(new Color(242, 240, 230));
+        }
         
         boolean isRep   = "rep".equals(userRole) || "admin".equals(userRole);
         boolean isAdmin = "admin".equals(userRole);
@@ -1578,6 +1645,82 @@ public class ProjectFrame extends JFrame {
             }
         } catch (SQLException e) {
             e.printStackTrace();
+        }
+    }
+
+    private void searchReservations(String flightNum, String customerName) {
+        if (allBookingsTableModel == null) return;
+        allBookingsTableModel.setRowCount(0);
+
+        if (flightNum.isEmpty() && customerName.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "Please enter either a flight number or customer name to search.",
+                    "Search Parameters Required", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        StringBuilder sql = new StringBuilder(
+                "SELECT t.AccountID, " +
+                "CONCAT(c.FirstName, ' ', c.LastName) AS CustomerName, " +
+                "CONCAT(f.DepartureAirport, '→', f.ArrivalAirport) AS Route, " +
+                "f.FlightNumber, t.FlightClass, t.Status, ts.DepartureDate " +
+                "FROM Ticket t " +
+                "JOIN TicketSegment ts ON t.TicketID = ts.TicketID " +
+                "JOIN Flight f ON ts.FlightID = f.FlightID " +
+                "JOIN Customer c ON t.CustomerID = c.CustomerID " +
+                "WHERE 1=1 ");
+
+        List<Object> params = new ArrayList<>();
+
+        if (!flightNum.isEmpty()) {
+            sql.append("AND f.FlightNumber = ? ");
+            try {
+                params.add(Integer.parseInt(flightNum));
+            } catch (NumberFormatException e) {
+                JOptionPane.showMessageDialog(this,
+                        "Flight number must be a valid integer.",
+                        "Invalid Flight Number", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+        }
+
+        if (!customerName.isEmpty()) {
+            sql.append("AND (c.FirstName LIKE ? OR c.LastName LIKE ?) ");
+            String pattern = "%" + customerName + "%";
+            params.add(pattern);
+            params.add(pattern);
+        }
+
+        sql.append("ORDER BY ts.DepartureDate DESC LIMIT 500");
+
+        try (PreparedStatement ps = con.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setObject(i + 1, params.get(i));
+            }
+            ResultSet rs = ps.executeQuery();
+            int count = 0;
+            while (rs.next()) {
+                allBookingsTableModel.addRow(new Object[]{
+                    rs.getString("AccountID"),
+                    rs.getString("CustomerName"),
+                    rs.getString("Route"),
+                    rs.getInt("FlightNumber"),
+                    rs.getString("FlightClass"),
+                    rs.getString("Status"),
+                    rs.getDate("DepartureDate")
+                });
+                count++;
+            }
+            if (count == 0) {
+                JOptionPane.showMessageDialog(this,
+                        "No reservations found matching the search criteria.",
+                        "No Results", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this,
+                    "Search failed: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
