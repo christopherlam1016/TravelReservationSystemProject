@@ -113,9 +113,11 @@ SELECT f.FlightID, d.day FROM Flight f
     JOIN (SELECT 'Tue' AS day UNION ALL SELECT 'Thu' UNION ALL SELECT 'Sat') d
     WHERE f.FlightNumber = 500 AND f.AirlineID = 'B6';
 
--- Customer and Account for user 'yk564' (allows booking test)
+-- Customer and Account records (AccountID must match the users.user value)
 INSERT IGNORE INTO Customer (CustomerID, FirstName, LastName, Email) VALUES
-    (1, 'Yash', 'Kode', 'yashkode@gmail.com');
+    (1, 'Yash',  'Kode', 'yashkode@gmail.com'),
+    (2, 'test',  '',     NULL);
 
 INSERT IGNORE INTO Account (AccountID, CustomerID) VALUES
-    ('yk564', 1);
+    ('yk564', 1),
+    ('test',  2);

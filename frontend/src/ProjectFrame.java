@@ -114,9 +114,9 @@ public class ProjectFrame extends JFrame {
                     ps.setString(1, newUser);
                     ps.setString(2, passwd);
                     ps.setString(3, "customer");
-                    int result = ps.executeUpdate();
-                    String s = "User " + newUser + " has been added (" + result + ")";
-                    msg.setText(s);
+                    ps.executeUpdate();
+                    msg.setText("User " + newUser + " has been added.");
+                    provisionCustomerAccount(newUser);
                 } catch (SQLException e1) {
                     msg.setText("Unable to add new user: " + e1.getMessage());
                 }
@@ -564,6 +564,7 @@ public class ProjectFrame extends JFrame {
                         "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)")) {
                     ps.setString(1, newU); ps.setString(2, newP); ps.setString(3, newR);
                     ps.executeUpdate();
+                    if ("customer".equals(newR)) provisionCustomerAccount(newU);
                     tfNewUser.setText(""); tfNewPass.setText("");
                     loadAllUsers();
                 } catch (SQLException ex) {
@@ -1140,6 +1141,36 @@ public class ProjectFrame extends JFrame {
         dialog.add(answerScroll, BorderLayout.CENTER);
         dialog.add(btnRow, BorderLayout.SOUTH);
         dialog.setVisible(true);
+    }
+
+    private void provisionCustomerAccount(String username) {
+        try {
+            // Check if an Account already exists for this username
+            try (PreparedStatement chk = con.prepareStatement(
+                    "SELECT AccountID FROM Account WHERE AccountID = ?")) {
+                chk.setString(1, username);
+                if (chk.executeQuery().next()) return; // already provisioned
+            }
+            int customerId = -1;
+            try (PreparedStatement psC = con.prepareStatement(
+                    "INSERT INTO Customer (FirstName, LastName) VALUES (?, '')",
+                    Statement.RETURN_GENERATED_KEYS)) {
+                psC.setString(1, username);
+                psC.executeUpdate();
+                ResultSet gk = psC.getGeneratedKeys();
+                if (gk.next()) customerId = gk.getInt(1);
+            }
+            if (customerId > 0) {
+                try (PreparedStatement psA = con.prepareStatement(
+                        "INSERT IGNORE INTO Account (AccountID, CustomerID) VALUES (?, ?)")) {
+                    psA.setString(1, username);
+                    psA.setInt(2, customerId);
+                    psA.executeUpdate();
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
 
     private String escapeHtml(String s) {
