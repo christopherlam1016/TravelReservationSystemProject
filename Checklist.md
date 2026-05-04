@@ -4,17 +4,17 @@
 **(20 points)**
 
 ### Flight Search & Browsing
-- [DONE] **Search Flights:** Allow users to search for flights between two airports.
-    - [DONE] One-way on a specific date.
-    - [DONE] Round-trip on specific dates.
-    - [DONE] Flexible dates (+/- 3 days) for one-way or round-trip.
-- [DONE] **Browse Results:** View the resulting list of available flights.
-- [DONE] **Sort Flights:** Ability to sort by:
+- [] **Search Flights:** Allow users to search for flights between two airports.
+    - [] One-way on a specific date.
+    - [] Round-trip on specific dates.
+    - [] Flexible dates (+/- 3 days) for one-way or round-trip.
+- [] **Browse Results:** View the resulting list of available flights.
+- [] **Sort Flights:** Ability to sort by:
     - Price
     - Take-off time
     - Landing time
     - Flight duration
-- [DONE] **Filter Flights:** Ability to filter by:
+- [] **Filter Flights:** Ability to filter by:
     - Price range
     - Number of stops
     - Airline
