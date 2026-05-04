@@ -36,6 +36,10 @@ public class ProjectFrame extends JFrame {
     JPanel lookupCardsPanel;
     JComboBox<String> cbAccountLookup;
     boolean suppressLookup = false;
+    JComboBox<String> cbSort;
+    JComboBox<String> cbAirlineFilter;
+    JComboBox<String> cbDepWindow;
+    JTextField tfMaxPrice;
     DefaultTableModel usersTableModel;
     DefaultTableModel allBookingsTableModel;
     int loggedInCustomerId = -1;
@@ -156,7 +160,7 @@ public class ProjectFrame extends JFrame {
                             loggedInCustomerId = rsAcc.next() ? rsAcc.getInt("CustomerID") : -1;
                         } catch (SQLException ignored) { loggedInCustomerId = -1; }
                         updateDashboardInfo();
-                        loadFlights("", "", "");
+                        loadFlights();
                         cardLayout.show(rootPanel, "dashboard");
                     } else {
                         String s = "Unknown user: invalid username or password";
@@ -284,43 +288,63 @@ public class ProjectFrame extends JFrame {
         tfDate.setFont(fieldFont);
         tfDate.setToolTipText("Enter date as yyyy-MM-dd, or leave blank for all dates");
 
-        JPanel searchPanel = new JPanel(new GridLayout(2, 4, 8, 8));
+        cbSort = new JComboBox<>(new String[]{
+            "Departure Time ↑", "Departure Time ↓",
+            "Price ↑", "Price ↓",
+            "Duration ↑", "Duration ↓",
+            "Arrival Time ↑", "Arrival Time ↓"
+        });
+        cbSort.setFont(fieldFont);
+
+        cbAirlineFilter = new JComboBox<>();
+        cbAirlineFilter.setFont(fieldFont);
+
+        tfMaxPrice = new JTextField();
+        tfMaxPrice.setFont(fieldFont);
+        tfMaxPrice.setToolTipText("Max price, e.g. 300 — leave blank for no limit");
+
+        cbDepWindow = new JComboBox<>(new String[]{
+            "Any Time", "Morning (6am – 12pm)", "Afternoon (12pm – 6pm)", "Evening (6pm – midnight)"
+        });
+        cbDepWindow.setFont(fieldFont);
+
+        JPanel searchPanel = new JPanel(new GridLayout(4, 4, 8, 6));
         searchPanel.setOpaque(false);
         searchPanel.setBorder(BorderFactory.createTitledBorder("Explore Flights"));
+
         JLabel lbFrom = new JLabel("From Airport");
         JLabel lbTo = new JLabel("To Airport");
-        JLabel lbDate = new JLabel("Date (yyyy-MM-dd or blank)");
-        JLabel lbBlank = new JLabel();
+        JLabel lbDate = new JLabel("Date (yyyy-MM-dd)");
+        JLabel lbSort = new JLabel("Sort By");
+        JLabel lbAirline = new JLabel("Airline");
+        JLabel lbMaxPrice = new JLabel("Max Price ($)");
+        JLabel lbDepWindow = new JLabel("Time of Day");
         JButton btnSearchFlights = new JButton("Search Flights");
 
         lbFrom.setFont(fieldFont);
         lbTo.setFont(fieldFont);
-        lbDate.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
+        lbDate.setFont(fieldFont);
+        lbSort.setFont(fieldFont);
+        lbAirline.setFont(fieldFont);
+        lbMaxPrice.setFont(fieldFont);
+        lbDepWindow.setFont(fieldFont);
         btnSearchFlights.setFont(new Font("Lucida Sans", Font.BOLD, 14));
 
         btnSearchFlights.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 dashboardStatus.setText(" ");
-                String fromSel = cbFrom.getSelectedItem().toString();
-                String toSel = cbTo.getSelectedItem().toString();
-                String fromCode = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
-                String toCode = toSel.equals("Any") ? "" : toSel.substring(0, 3);
-                loadFlights(fromCode, toCode, tfDate.getText().trim());
+                loadFlights();
             }
         });
 
-        searchPanel.add(lbFrom);
-        searchPanel.add(lbTo);
-        searchPanel.add(lbDate);
-        searchPanel.add(lbBlank);
-        searchPanel.add(cbFrom);
-        searchPanel.add(cbTo);
-        searchPanel.add(tfDate);
-        searchPanel.add(btnSearchFlights);
+        searchPanel.add(lbFrom);         searchPanel.add(lbTo);        searchPanel.add(lbDate);       searchPanel.add(lbSort);
+        searchPanel.add(cbFrom);         searchPanel.add(cbTo);        searchPanel.add(tfDate);       searchPanel.add(cbSort);
+        searchPanel.add(lbAirline);      searchPanel.add(lbMaxPrice);  searchPanel.add(lbDepWindow);  searchPanel.add(new JLabel());
+        searchPanel.add(cbAirlineFilter);searchPanel.add(tfMaxPrice);  searchPanel.add(cbDepWindow);  searchPanel.add(btnSearchFlights);
 
         flightTableModel = new DefaultTableModel(
-                new String[] { "Flight #", "Airline", "From", "To", "Departure", "Arrival", "Type", "Operates" }, 0) {
+                new String[] { "Flight #", "Airline", "From", "To", "Departure", "Arrival", "Duration", "Price ($)", "Type", "Operates" }, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
@@ -350,7 +374,7 @@ public class ProjectFrame extends JFrame {
         searchPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         tableScrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         customerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
-        searchPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 140));
+        searchPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 220));
         tableScrollPane.setPreferredSize(new Dimension(800, 260));
         tableScrollPane.setMinimumSize(new Dimension(350, 180));
         centerPanel.add(customerPanel);
@@ -642,17 +666,39 @@ public class ProjectFrame extends JFrame {
         if (adminSection != null) adminSection.setVisible(isAdmin);
         if (isRep)   refreshAccountDropdown();
         if (isAdmin) loadAllUsers();
+        loadAirlineFilter();
     }
 
-    private void loadFlights(String fromAirport, String toAirport, String flightDate) {
-        if (flightTableModel == null) {
-            return;
-        }
-
+    private void loadFlights() {
+        if (flightTableModel == null) return;
         flightTableModel.setRowCount(0);
         flightRowIds.clear();
+
+        String fromSel    = (cbFrom == null) ? "Any" : cbFrom.getSelectedItem().toString();
+        String toSel      = (cbTo   == null) ? "Any" : cbTo.getSelectedItem().toString();
+        String flightDate = (tfDate == null) ? "" : tfDate.getText().trim();
+        String fromCode   = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
+        String toCode     = toSel.equals("Any")   ? "" : toSel.substring(0, 3);
+
+        String maxPriceStr = (tfMaxPrice == null) ? "" : tfMaxPrice.getText().trim();
+        boolean filterPrice = !maxPriceStr.isEmpty();
+
+        String airlineSel    = (cbAirlineFilter == null) ? "All Airlines"
+                                : cbAirlineFilter.getSelectedItem().toString();
+        boolean filterAirline = !"All Airlines".equals(airlineSel);
+        String airlineCode    = filterAirline ? airlineSel.substring(0, 2) : "";
+
+        String windowSel    = (cbDepWindow == null) ? "Any Time"
+                               : cbDepWindow.getSelectedItem().toString();
+        String windowClause = depWindowToSql(windowSel);
+
+        boolean filterFrom = !fromCode.isEmpty();
+        boolean filterTo   = !toCode.isEmpty();
+        boolean filterDate = !flightDate.isEmpty();
+
         String sql = "SELECT f.FlightID, f.FlightNumber, f.Airline_Name, f.DepartureAirport, "
-                + "f.ArrivalAirport, f.DepartureTime, f.ArrivalTime, f.Travel_Type, "
+                + "f.ArrivalAirport, f.DepartureTime, f.ArrivalTime, f.Travel_Type, f.BaseFare, "
+                + "TIMESTAMPDIFF(MINUTE, f.DepartureTime, f.ArrivalTime) AS DurationMin, "
                 + "GROUP_CONCAT(fod.DayOfWeek ORDER BY "
                 + "FIELD(fod.DayOfWeek,'Mon','Tue','Wed','Thu','Fri','Sat','Sun') "
                 + "SEPARATOR '/') AS OperatingDays "
@@ -660,39 +706,31 @@ public class ProjectFrame extends JFrame {
                 + "LEFT JOIN FlightOperatingDay fod ON f.FlightID = fod.FlightID "
                 + "WHERE 1=1";
 
-        boolean filterFrom = fromAirport != null && !fromAirport.trim().isEmpty();
-        boolean filterTo = toAirport != null && !toAirport.trim().isEmpty();
-        boolean filterDate = flightDate != null && !flightDate.trim().isEmpty();
+        if (filterFrom)    sql += " AND f.DepartureAirport = ?";
+        if (filterTo)      sql += " AND f.ArrivalAirport = ?";
+        if (filterDate)    sql += " AND DATE(f.DepartureTime) = ?";
+        if (filterPrice)   sql += " AND f.BaseFare <= ?";
+        if (filterAirline) sql += " AND f.AirlineID = ?";
+        if (windowClause != null) sql += windowClause;
 
-        if (filterFrom) {
-            sql += " AND f.DepartureAirport = ?";
-        }
-        if (filterTo) {
-            sql += " AND f.ArrivalAirport = ?";
-        }
-        if (filterDate) {
-            sql += " AND DATE(f.DepartureTime) = ?";
-        }
         sql += " GROUP BY f.FlightID, f.FlightNumber, f.Airline_Name, f.DepartureAirport, "
-             + "f.ArrivalAirport, f.DepartureTime, f.ArrivalTime, f.Travel_Type "
-             + "ORDER BY f.DepartureTime LIMIT 100";
+             + "f.ArrivalAirport, f.DepartureTime, f.ArrivalTime, f.Travel_Type, f.BaseFare"
+             + " ORDER BY " + sortToSql() + " LIMIT 100";
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
             int idx = 1;
-            if (filterFrom) {
-                ps.setString(idx++, fromAirport.trim());
-            }
-            if (filterTo) {
-                ps.setString(idx++, toAirport.trim());
-            }
-            if (filterDate) {
-                ps.setString(idx++, flightDate.trim());
-            }
+            if (filterFrom)    ps.setString(idx++, fromCode);
+            if (filterTo)      ps.setString(idx++, toCode);
+            if (filterDate)    ps.setString(idx++, flightDate);
+            if (filterPrice)   ps.setDouble(idx++, Double.parseDouble(maxPriceStr));
+            if (filterAirline) ps.setString(idx++, airlineCode);
 
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     flightRowIds.add(rs.getLong("FlightID"));
-                    String days = rs.getString("OperatingDays");
+                    int    durMin = rs.getInt("DurationMin");
+                    String durStr = (durMin / 60) + "h " + (durMin % 60) + "m";
+                    String days   = rs.getString("OperatingDays");
                     flightTableModel.addRow(new Object[] {
                             rs.getInt("FlightNumber"),
                             rs.getString("Airline_Name"),
@@ -700,15 +738,60 @@ public class ProjectFrame extends JFrame {
                             rs.getString("ArrivalAirport"),
                             rs.getTimestamp("DepartureTime"),
                             rs.getTimestamp("ArrivalTime"),
+                            durStr,
+                            String.format("$%.2f", rs.getDouble("BaseFare")),
                             rs.getString("Travel_Type"),
                             days != null ? days : "—"
                     });
                 }
             }
+        } catch (NumberFormatException nfe) {
+            dashboardStatus.setText("Invalid max price — enter a number (e.g. 300).");
         } catch (SQLException e) {
             e.printStackTrace();
             dashboardStatus.setText("Error loading flights: " + e.getMessage());
         }
+    }
+
+    private String sortToSql() {
+        if (cbSort == null) return "f.DepartureTime ASC";
+        switch (cbSort.getSelectedItem().toString()) {
+            case "Departure Time ↓": return "f.DepartureTime DESC";
+            case "Price ↑":          return "f.BaseFare ASC";
+            case "Price ↓":          return "f.BaseFare DESC";
+            case "Duration ↑":       return "DurationMin ASC";
+            case "Duration ↓":       return "DurationMin DESC";
+            case "Arrival Time ↑":   return "f.ArrivalTime ASC";
+            case "Arrival Time ↓":   return "f.ArrivalTime DESC";
+            default:                 return "f.DepartureTime ASC";
+        }
+    }
+
+    private String depWindowToSql(String windowSel) {
+        switch (windowSel) {
+            case "Morning (6am – 12pm)":     return " AND HOUR(f.DepartureTime) BETWEEN 6 AND 11";
+            case "Afternoon (12pm – 6pm)":   return " AND HOUR(f.DepartureTime) BETWEEN 12 AND 17";
+            case "Evening (6pm – midnight)": return " AND HOUR(f.DepartureTime) BETWEEN 18 AND 23";
+            default:                         return null;
+        }
+    }
+
+    private void loadAirlineFilter() {
+        if (cbAirlineFilter == null) return;
+        Object prev = cbAirlineFilter.getSelectedItem();
+        cbAirlineFilter.removeAllItems();
+        cbAirlineFilter.addItem("All Airlines");
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT AirlineID, AirlineName FROM AirlineCompany ORDER BY AirlineName")) {
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                cbAirlineFilter.addItem(
+                        rs.getString("AirlineID") + " — " + rs.getString("AirlineName"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        if (prev != null) cbAirlineFilter.setSelectedItem(prev);
     }
 
     private void showBookingForm(int rowIndex) {
