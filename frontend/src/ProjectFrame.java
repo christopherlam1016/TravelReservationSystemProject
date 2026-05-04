@@ -894,17 +894,6 @@ public class ProjectFrame extends JFrame {
                             JOptionPane.WARNING_MESSAGE);
                     return;
                 }
-                try (PreparedStatement ck = con.prepareStatement(
-                        "SELECT AccountID FROM Account WHERE AccountID = ?")) {
-                    ck.setString(1, user);
-                    if (!ck.executeQuery().next()) {
-                        JOptionPane.showMessageDialog(ProjectFrame.this,
-                                "No customer account found for '" + user + "'.\nContact an admin.",
-                                "Profile Not Found", JOptionPane.WARNING_MESSAGE);
-                        return;
-                    }
-                } catch (SQLException ex) { ex.printStackTrace(); return; }
-
                 try (PreparedStatement ps = con.prepareStatement(
                         "INSERT INTO CustomerQuestion (AccountID, Question) VALUES (?, ?)")) {
                     ps.setString(1, user);

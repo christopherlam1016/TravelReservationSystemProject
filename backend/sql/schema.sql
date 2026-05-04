@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS CustomerQuestion (
     AnsweredAt DATETIME,
     AnsweredBy VARCHAR(100),
     Status ENUM('open', 'answered') NOT NULL DEFAULT 'open',
-    CONSTRAINT fk_question_account FOREIGN KEY (AccountID) REFERENCES Account(AccountID)
+    CONSTRAINT fk_question_user FOREIGN KEY (AccountID) REFERENCES users(`user`)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
