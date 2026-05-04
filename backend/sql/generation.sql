@@ -177,5 +177,25 @@ ON DUPLICATE KEY UPDATE
 	RequestedAt = VALUES(RequestedAt);
 
 -- Keep AUTO_INCREMENT ahead of explicit IDs used above
-ALTER TABLE Customer AUTO_INCREMENT = 6;
+ALTER TABLE Customer AUTO_INCREMENT = 4;
 ALTER TABLE Flight AUTO_INCREMENT = 1005;
+
+-- 8) Additional test data for admin reports (Megan added) BELOW 
+INSERT INTO Account (AccountID, CustomerID, CreatedAt)
+VALUES ('ACC004', 4, '2026-04-04 10:00:00')
+ON DUPLICATE KEY UPDATE CustomerID = VALUES(CustomerID);
+
+INSERT INTO Ticket (TicketID, TicketNumber, TicketType, FlightClass, BookingFee, TotalFare, PurchaseDate, Flexibility, FromAirport, ToAirport, IsPaid, Status, CustomerID, AccountID)
+VALUES
+    ('TICK004', 900000004, 'one_way', 'first', 40.00, 660.00, '2026-04-13 10:00:00', FALSE, 'JFK', 'LAX', TRUE, 'booked', 4, 'ACC004'),
+    ('TICK005', 900000005, 'round_trip', 'economy', 20.00, 440.00, '2026-04-14 11:00:00', FALSE, 'LAX', 'JFK', TRUE, 'booked', 1, 'ACC001'),
+    ('TICK006', 900000006, 'one_way', 'business', 30.00, 850.00, '2026-04-15 12:00:00', FALSE, 'JFK', 'LAX', TRUE, 'booked', 2, 'ACC002')
+ON DUPLICATE KEY UPDATE TotalFare = VALUES(TotalFare);
+
+INSERT INTO TicketSegment (TicketID, SegmentOrder, FlightID, DepartureDate, SeatNumber, SpecialMeal, SegmentFare)
+VALUES
+    ('TICK004', 1, 1001, '2026-05-01', '1A', NULL, 620.00),
+    ('TICK005', 1, 1001, '2026-05-01', '2B', NULL, 220.00),
+    ('TICK005', 2, 1002, '2026-05-10', '2B', NULL, 210.00),
+    ('TICK006', 1, 1001, '2026-05-01', '3C', NULL, 820.00)
+ON DUPLICATE KEY UPDATE SegmentFare = VALUES(SegmentFare);
