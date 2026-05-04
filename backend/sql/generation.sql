@@ -35,7 +35,8 @@ VALUES
 	(1, 'Megan', 'Souza', 'megan.souza@rutgers.edu', '555-1001'),
 	(2, 'Yash', 'Kode', 'yash.kode@rutgers.edu', '555-1002'),
 	(3, 'Chris', 'Lam', 'chris.lam@rutgers.edu', '555-1003'),
-    (4, 'Lucas', 'Ganjia', 'lucas.ganjia@rutgers.edu', '555-1004')
+    (4, 'Lucas', 'Ganjia', 'lucas.ganjia@rutgers.edu', '555-1004'),
+	(5, 'Test', 'Customer', 'test.customer@rutgers.edu', '555-1005')
 ON DUPLICATE KEY UPDATE
 	FirstName = VALUES(FirstName),
 	LastName = VALUES(LastName),
@@ -56,7 +57,8 @@ INSERT INTO Account (AccountID, CustomerID, CreatedAt)
 VALUES
 	('ACC001', 1, '2026-04-01 10:00:00'),
 	('ACC002', 2, '2026-04-02 10:00:00'),
-	('ACC003', 3, '2026-04-03 10:00:00')
+	('ACC003', 3, '2026-04-03 10:00:00'),
+	('test', 5, '2026-04-04 10:00:00')
 ON DUPLICATE KEY UPDATE
 	CustomerID = VALUES(CustomerID),
 	CreatedAt = VALUES(CreatedAt);
@@ -175,5 +177,5 @@ ON DUPLICATE KEY UPDATE
 	RequestedAt = VALUES(RequestedAt);
 
 -- Keep AUTO_INCREMENT ahead of explicit IDs used above
-ALTER TABLE Customer AUTO_INCREMENT = 4;
+ALTER TABLE Customer AUTO_INCREMENT = 6;
 ALTER TABLE Flight AUTO_INCREMENT = 1005;
