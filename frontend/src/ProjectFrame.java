@@ -1448,13 +1448,13 @@ public class ProjectFrame extends JFrame {
             }
         });
 
-        JButton btnChange = new JButton("Change Flight");
+        JButton btnChange = new JButton("Edit Details");
         btnChange.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
         btnChange.setEnabled(isActive);
         btnChange.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                showChangeFlightDialog(ticketId, segmentOrder);
+                showEditDetailsDialog(ticketId, segmentOrder, ticketType, flightClass, seat, meal);
             }
         });
 
@@ -1474,6 +1474,131 @@ public class ProjectFrame extends JFrame {
         card.add(centerInfo, BorderLayout.CENTER);
         card.add(actionPanel, BorderLayout.EAST);
         return card;
+    }
+
+    private void showEditDetailsDialog(String ticketId, int segmentOrder,
+            String currentType, String currentClass, String currentSeat, String currentMeal) {
+        Font dlgFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        JDialog dialog = new JDialog(this, "Edit Booking — " + ticketId, true);
+        dialog.setSize(480, 300);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10, 10));
+        dialog.getRootPane().setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+
+        JComboBox<String> cbType = new JComboBox<>(new String[]{"one_way", "round_trip"});
+        if (currentType != null) cbType.setSelectedItem(currentType);
+        cbType.setFont(dlgFont);
+
+        JComboBox<String> cbClass = new JComboBox<>(new String[]{"economy", "business", "first"});
+        if (currentClass != null) cbClass.setSelectedItem(currentClass);
+        cbClass.setFont(dlgFont);
+
+        JComboBox<String> cbSeat = new JComboBox<>();
+        cbSeat.addItem("No Preference");
+        cbSeat.setFont(dlgFont);
+
+        JComboBox<String> cbMeal = new JComboBox<>(new String[]{
+            "None", "Vegetarian", "Vegan", "Kosher",
+            "Halal", "Gluten-Free", "Low-Sodium", "Child Meal"
+        });
+        cbMeal.setSelectedItem((currentMeal != null && !currentMeal.isEmpty()) ? currentMeal : "None");
+        cbMeal.setFont(dlgFont);
+
+        // Load seat options from the flight already attached to this ticket
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT ac.SeatCapacity FROM TicketSegment ts "
+                + "JOIN Flight f ON ts.FlightID = f.FlightID "
+                + "JOIN Aircraft ac ON f.AircraftID = ac.AircraftID "
+                + "WHERE ts.TicketID = ? AND ts.SegmentOrder = ?")) {
+            ps.setString(1, ticketId);
+            ps.setInt(2, segmentOrder);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                int capacity = rs.getInt("SeatCapacity");
+                int rows = (int) Math.ceil(capacity / 6.0);
+                String[] letters = {"A","B","C","D","E","F"};
+                int count = 0;
+                outer:
+                for (int r = 1; r <= rows; r++) {
+                    for (String l : letters) {
+                        cbSeat.addItem(r + l);
+                        if (++count >= capacity) break outer;
+                    }
+                }
+            }
+        } catch (SQLException ex) { ex.printStackTrace(); }
+        if (currentSeat != null && !currentSeat.isEmpty()) cbSeat.setSelectedItem(currentSeat);
+
+        JPanel formPanel = new JPanel(new GridLayout(4, 2, 10, 10));
+        formPanel.setOpaque(false);
+        formPanel.setBorder(BorderFactory.createTitledBorder("Booking Details"));
+        String[] labels = {"Ticket Type", "Class", "Seat Number", "Special Meal"};
+        JComponent[] fields = {cbType, cbClass, cbSeat, cbMeal};
+        for (int i = 0; i < labels.length; i++) {
+            JLabel lbl = new JLabel(labels[i]);
+            lbl.setFont(dlgFont);
+            formPanel.add(lbl);
+            formPanel.add(fields[i]);
+        }
+
+        JButton btnSave = new JButton("Save Changes");
+        btnSave.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnSave.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String newType  = cbType.getSelectedItem().toString();
+                String newClass = cbClass.getSelectedItem().toString();
+                String seatSel  = cbSeat.getSelectedItem().toString();
+                String seatNum  = seatSel.equals("No Preference") ? null : seatSel;
+                String mealSel  = cbMeal.getSelectedItem().toString();
+                String meal     = mealSel.equals("None") ? null : mealSel;
+                try {
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "UPDATE Ticket SET TicketType = ?, FlightClass = ?, Status = 'changed' "
+                            + "WHERE TicketID = ?")) {
+                        ps.setString(1, newType);
+                        ps.setString(2, newClass);
+                        ps.setString(3, ticketId);
+                        ps.executeUpdate();
+                    }
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "UPDATE TicketSegment SET SeatNumber = ?, SpecialMeal = ? "
+                            + "WHERE TicketID = ? AND SegmentOrder = ?")) {
+                        ps.setString(1, seatNum);
+                        ps.setString(2, meal);
+                        ps.setString(3, ticketId);
+                        ps.setInt(4, segmentOrder);
+                        ps.executeUpdate();
+                    }
+                    dialog.dispose();
+                    loadMyBookings();
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                    if (ex.getErrorCode() == 1062) {
+                        JOptionPane.showMessageDialog(dialog,
+                                "Seat " + seatSel + " is already taken. Pick another.");
+                    } else {
+                        JOptionPane.showMessageDialog(dialog,
+                                "Save failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            }
+        });
+
+        JButton btnCancel = new JButton("Cancel");
+        btnCancel.setFont(dlgFont);
+        btnCancel.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { dialog.dispose(); }
+        });
+
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        btnRow.setOpaque(false);
+        btnRow.add(btnCancel);
+        btnRow.add(btnSave);
+
+        dialog.add(formPanel, BorderLayout.CENTER);
+        dialog.add(btnRow, BorderLayout.SOUTH);
+        dialog.setVisible(true);
     }
 
     private Color getStatusColor(String status) {
