@@ -560,19 +560,39 @@ public class ProjectFrame extends JFrame {
                     JOptionPane.showMessageDialog(ProjectFrame.this, "Username and password required.");
                     return;
                 }
-                try (PreparedStatement ps = con.prepareStatement(
-                        "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)")) {
-                    ps.setString(1, newU); ps.setString(2, newP); ps.setString(3, newR);
-                    ps.executeUpdate();
+                boolean previousAutoCommit = true;
+                try {
+                    previousAutoCommit = con.getAutoCommit();
+                    con.setAutoCommit(false);
+
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)")) {
+                        ps.setString(1, newU);
+                        ps.setString(2, newP);
+                        ps.setString(3, newR);
+                        ps.executeUpdate();
+                    }
+
+                    if ("customer".equals(newR)) {
+                        if (!createCustomerAccountForUser(newU)) {
+                            con.rollback();
+                            return;
+                        }
+                    }
+
+                    con.commit();
                     tfNewUser.setText(""); tfNewPass.setText("");
                     loadAllUsers();
                 } catch (SQLException ex) {
+                    try { con.rollback(); } catch (SQLException ignored) { }
                     if (ex.getErrorCode() == 1062) {
                         JOptionPane.showMessageDialog(ProjectFrame.this,
                                 "Username '" + newU + "' already exists.");
                     } else {
                         JOptionPane.showMessageDialog(ProjectFrame.this, "Error: " + ex.getMessage());
                     }
+                } finally {
+                    try { con.setAutoCommit(previousAutoCommit); } catch (SQLException ignored) { }
                 }
             }
         });
@@ -715,8 +735,39 @@ public class ProjectFrame extends JFrame {
 
     private void updateDashboardInfo() {
         dashboardHeader.setText("Logged in as " + user + " (Role: " + userRole + ")");
-        customerInfoLabel.setText("<html><b>Username:</b> " + user
-                + "<br/><b>Role:</b> " + userRole + "</html>");
+        
+        StringBuilder infoText = new StringBuilder("<html><b>Username:</b> " + user
+                + "<br/><b>Role:</b> " + userRole);
+        
+        if ("customer".equals(userRole) && loggedInCustomerId >= 0) {
+            try (PreparedStatement ps = con.prepareStatement(
+                    "SELECT FirstName, LastName, Email, Phone FROM Customer WHERE CustomerID = ?")) {
+                ps.setInt(1, loggedInCustomerId);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    String firstName = rs.getString("FirstName");
+                    String lastName = rs.getString("LastName");
+                    String email = rs.getString("Email");
+                    String phone = rs.getString("Phone");
+                    
+                    if (firstName != null && lastName != null) {
+                        infoText.append("<br/><b>Name:</b> ").append(firstName).append(" ").append(lastName);
+                    }
+                    if (email != null && !email.isEmpty()) {
+                        infoText.append("<br/><b>Email:</b> ").append(email);
+                    }
+                    if (phone != null && !phone.isEmpty()) {
+                        infoText.append("<br/><b>Phone:</b> ").append(phone);
+                    }
+                }
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+            }
+        }
+        
+        infoText.append("</html>");
+        customerInfoLabel.setText(infoText.toString());
+        
         boolean isRep   = "rep".equals(userRole) || "admin".equals(userRole);
         boolean isAdmin = "admin".equals(userRole);
         if (repSection   != null) repSection.setVisible(isRep);
@@ -1942,6 +1993,82 @@ public class ProjectFrame extends JFrame {
                     "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    private boolean createCustomerAccountForUser(String accountId) throws SQLException {
+        JTextField tfFirstName = new JTextField();
+        JTextField tfLastName = new JTextField();
+        JTextField tfEmail = new JTextField();
+        JTextField tfPhone = new JTextField();
+
+        JPanel profilePanel = new JPanel(new GridLayout(0, 2, 8, 8));
+        profilePanel.add(new JLabel("Account ID:"));
+        profilePanel.add(new JLabel(accountId));
+        profilePanel.add(new JLabel("First Name:"));
+        profilePanel.add(tfFirstName);
+        profilePanel.add(new JLabel("Last Name:"));
+        profilePanel.add(tfLastName);
+        profilePanel.add(new JLabel("Email (optional):"));
+        profilePanel.add(tfEmail);
+        profilePanel.add(new JLabel("Phone (optional):"));
+        profilePanel.add(tfPhone);
+
+        int result = JOptionPane.showConfirmDialog(this, profilePanel,
+                "Customer Profile for \"" + accountId + "\"",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) {
+            return false;
+        }
+
+        String firstName = tfFirstName.getText().trim();
+        String lastName = tfLastName.getText().trim();
+        String email = tfEmail.getText().trim();
+        String phone = tfPhone.getText().trim();
+
+        if (firstName.isEmpty() || lastName.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "First name and last name are required for customer accounts.",
+                    "Missing Customer Details", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        Integer customerId = null;
+        try (PreparedStatement psCustomer = con.prepareStatement(
+                "INSERT INTO Customer (FirstName, LastName, Email, Phone) VALUES (?, ?, ?, ?)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            psCustomer.setString(1, firstName);
+            psCustomer.setString(2, lastName);
+            if (email.isEmpty()) {
+                psCustomer.setNull(3, Types.VARCHAR);
+            } else {
+                psCustomer.setString(3, email);
+            }
+            if (phone.isEmpty()) {
+                psCustomer.setNull(4, Types.VARCHAR);
+            } else {
+                psCustomer.setString(4, phone);
+            }
+            psCustomer.executeUpdate();
+
+            try (ResultSet keys = psCustomer.getGeneratedKeys()) {
+                if (keys.next()) {
+                    customerId = keys.getInt(1);
+                }
+            }
+        }
+
+        if (customerId == null) {
+            throw new SQLException("Could not create customer profile.");
+        }
+
+        try (PreparedStatement psAccount = con.prepareStatement(
+                "INSERT INTO Account (AccountID, CustomerID) VALUES (?, ?)")) {
+            psAccount.setString(1, accountId);
+            psAccount.setInt(2, customerId);
+            psAccount.executeUpdate();
+        }
+
+        return true;
     }
 
     private JPanel buildConfirmationPanel() {
