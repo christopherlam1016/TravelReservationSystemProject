@@ -21,6 +21,8 @@ backend/
 - sql/
 	- schema.sql
 	- seed.sql
+   - reset.sql
+   - generation.sql
 
 ## Frontend (Java Swing)
 
@@ -46,14 +48,24 @@ SQL setup files:
 `seed.sql` inserts/updates:
 - Default user: `test` / `group16`
 
+`reset.sql` resets the DB schema and tables
+
+`generation.sql` adds more testing data to play around with.
+
 ## how to run
 
 1. Start local MySQL server. (open up mysql workbench then run schema.sql and seed.sql)
 2. Run the SQL scripts in order:
+   - backend/sql/reset.sql
 	- backend/sql/schema.sql
+   - backend/sql/generation.sql
 	- backend/sql/seed.sql
 3. Ensure a JDK is installed
 4. Ensure Maven is installed.
+
+NOTE (for the Grader/TA):
+   - Run `java -jar TravelReservationSystemProject.jar` to run the completed java project without compiling.
+
 5. From the repository root, move to the frontend folder:
 
    cd frontend
@@ -67,3 +79,11 @@ SQL setup files:
    mvn exec:java
 
 ## Notes
+
+The repository can be found online at:
+
+   https://github.com/christopherlam1016/TravelReservationSystemProject
+
+Full contribution history can be viewed there.
+
+
