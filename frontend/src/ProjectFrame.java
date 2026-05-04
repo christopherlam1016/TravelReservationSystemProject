@@ -879,7 +879,7 @@ public class ProjectFrame extends JFrame {
                 + "SEPARATOR '/') AS OperatingDays "
                 + "FROM Flight f "
                 + "LEFT JOIN FlightOperatingDay fod ON f.FlightID = fod.FlightID "
-                + "WHERE 1=1";
+                + "WHERE DATE(f.DepartureTime) >= CURDATE()";
 
         if (filterFrom)    sql += " AND f.DepartureAirport = ?";
         if (filterTo)      sql += " AND f.ArrivalAirport = ?";
@@ -1274,6 +1274,16 @@ public class ProjectFrame extends JFrame {
         bookingTo        = (String)  flightTableModel.getValueAt(rowIndex, 3);
         String dep       = flightTableModel.getValueAt(rowIndex, 4).toString();
         bookingDepDate   = dep.length() >= 10 ? dep.substring(0, 10) : dep;
+
+        try {
+            if (java.time.LocalDate.parse(bookingDepDate).isBefore(java.time.LocalDate.now())) {
+                JOptionPane.showMessageDialog(this,
+                        "Flight " + flightNum + " (" + bookingFrom + " → " + bookingTo + ")"
+                        + " departed on " + bookingDepDate + " and can no longer be booked.",
+                        "Flight Already Departed", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+        } catch (Exception ignored) {}
 
         bookingFlightInfo.setText("<html><b>Flight " + flightNum + "</b> &nbsp;&middot;&nbsp; "
                 + airline + "<br/>" + bookingFrom + " &rarr; " + bookingTo
