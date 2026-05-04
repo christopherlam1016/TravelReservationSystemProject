@@ -169,6 +169,20 @@ CREATE TABLE IF NOT EXISTS FlightWaitlist (
         ON DELETE CASCADE
 );
 
+-- 9. CustomerQuestion Table
+CREATE TABLE IF NOT EXISTS CustomerQuestion (
+    QuestionID BIGINT AUTO_INCREMENT PRIMARY KEY,
+    AccountID VARCHAR(50) NOT NULL,
+    Question TEXT NOT NULL,
+    Answer TEXT,
+    AskedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    AnsweredAt DATETIME,
+    AnsweredBy VARCHAR(100),
+    Status ENUM('open', 'answered') NOT NULL DEFAULT 'open',
+    CONSTRAINT fk_question_account FOREIGN KEY (AccountID) REFERENCES Account(AccountID)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 DELIMITER $$
 
 CREATE TRIGGER trg_flight_distinct_airports_bi

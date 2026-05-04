@@ -8,6 +8,7 @@ DROP TRIGGER IF EXISTS trg_flight_distinct_airports_bu;
 DROP TRIGGER IF EXISTS trg_ticket_distinct_airports_bi;
 DROP TRIGGER IF EXISTS trg_ticket_distinct_airports_bu;
 
+DROP TABLE IF EXISTS CustomerQuestion;
 DROP TABLE IF EXISTS FlightWaitlist;
 DROP TABLE IF EXISTS TicketSegment;
 DROP TABLE IF EXISTS Ticket;

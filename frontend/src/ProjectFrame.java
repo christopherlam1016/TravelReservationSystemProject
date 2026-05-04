@@ -43,6 +43,9 @@ public class ProjectFrame extends JFrame {
     DefaultTableModel usersTableModel;
     DefaultTableModel allBookingsTableModel;
     int loggedInCustomerId = -1;
+    JPanel questionsCardsPanel;
+    DefaultTableModel repQuestionsTableModel;
+    List<Long> repQuestionIds = new ArrayList<>();
 
     CardLayout cardLayout;
     JPanel rootPanel;
@@ -228,6 +231,7 @@ public class ProjectFrame extends JFrame {
         rootPanel.add(buildBookingPanel(), "booking");
         rootPanel.add(buildConfirmationPanel(), "confirmation");
         rootPanel.add(buildMyBookingsPanel(), "myBookings");
+        rootPanel.add(buildMyQuestionsPanel(), "myQuestions");
 
         // -- Add the mainPanel to our JForm and set up basic attributes
         this.add(rootPanel);
@@ -397,6 +401,18 @@ public class ProjectFrame extends JFrame {
         centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
         centerPanel.add(btnViewBookings);
 
+        JButton btnAskQuestion = new JButton("Ask a Question");
+        btnAskQuestion.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnAskQuestion.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnAskQuestion.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                loadMyQuestions();
+                cardLayout.show(rootPanel, "myQuestions");
+            }
+        });
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 6)));
+        centerPanel.add(btnAskQuestion);
+
         // ── Rep section: Customer Lookup ──────────────────────────────────────
         repSection = new JPanel();
         repSection.setOpaque(false);
@@ -446,6 +462,47 @@ public class ProjectFrame extends JFrame {
         repSection.add(lookupRow);
         repSection.add(Box.createRigidArea(new Dimension(0, 6)));
         repSection.add(lookupScroll);
+
+        repQuestionsTableModel = new DefaultTableModel(
+                new String[]{"Account", "Question Preview", "Asked At", "Status"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        JTable repQuestionsTable = new JTable(repQuestionsTableModel);
+        repQuestionsTable.setRowHeight(22);
+        repQuestionsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        JScrollPane repQScroll = new JScrollPane(repQuestionsTable);
+        repQScroll.setBorder(BorderFactory.createTitledBorder("Customer Questions"));
+        repQScroll.setPreferredSize(new Dimension(800, 150));
+        repQScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JButton btnLoadQs = new JButton("↻ Refresh Questions");
+        btnLoadQs.setFont(fieldFont);
+        JButton btnReply = new JButton("Reply to Selected");
+        btnReply.setFont(fieldFont);
+        btnLoadQs.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { loadRepQuestions(); }
+        });
+        btnReply.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int row = repQuestionsTable.getSelectedRow();
+                if (row < 0 || row >= repQuestionIds.size()) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this, "Select a question row first.");
+                    return;
+                }
+                replyToQuestion(repQuestionIds.get(row));
+            }
+        });
+
+        JPanel repQBtnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        repQBtnRow.setOpaque(false);
+        repQBtnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        repQBtnRow.add(btnLoadQs);
+        repQBtnRow.add(btnReply);
+
+        repSection.add(Box.createRigidArea(new Dimension(0, 10)));
+        repSection.add(repQScroll);
+        repSection.add(Box.createRigidArea(new Dimension(0, 4)));
+        repSection.add(repQBtnRow);
 
         // ── Admin section: User Management + All Bookings ─────────────────────
         adminSection = new JPanel();
@@ -664,7 +721,7 @@ public class ProjectFrame extends JFrame {
         boolean isAdmin = "admin".equals(userRole);
         if (repSection   != null) repSection.setVisible(isRep);
         if (adminSection != null) adminSection.setVisible(isAdmin);
-        if (isRep)   refreshAccountDropdown();
+        if (isRep)   { refreshAccountDropdown(); loadRepQuestions(); }
         if (isAdmin) loadAllUsers();
         loadAirlineFilter();
     }
@@ -792,6 +849,309 @@ public class ProjectFrame extends JFrame {
             e.printStackTrace();
         }
         if (prev != null) cbAirlineFilter.setSelectedItem(prev);
+    }
+
+    // ── Q&A: build customer "My Questions" card panel ─────────────────────────
+
+    private JPanel buildMyQuestionsPanel() {
+        JPanel page = new JPanel(new BorderLayout(10, 10));
+        page.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+        page.setBackground(new Color(242, 240, 230));
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        JButton btnBack = new JButton("← Back to Dashboard");
+        btnBack.setFont(fieldFont);
+        btnBack.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cardLayout.show(rootPanel, "dashboard");
+            }
+        });
+
+        JLabel title = new JLabel("Ask a Representative");
+        title.setFont(new Font("Lucida Sans", Font.BOLD, 20));
+
+        JPanel topPanel = new JPanel(new BorderLayout(10, 0));
+        topPanel.setOpaque(false);
+        topPanel.add(btnBack, BorderLayout.WEST);
+        topPanel.add(title, BorderLayout.CENTER);
+
+        JTextArea taQuestion = new JTextArea(4, 40);
+        taQuestion.setFont(fieldFont);
+        taQuestion.setLineWrap(true);
+        taQuestion.setWrapStyleWord(true);
+        taQuestion.setToolTipText("Type your question here…");
+        JScrollPane inputScroll = new JScrollPane(taQuestion);
+
+        JButton btnSubmit = new JButton("Submit Question");
+        btnSubmit.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnSubmit.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String q = taQuestion.getText().trim();
+                if (q.isEmpty()) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Please type a question first.", "Empty Question",
+                            JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                try (PreparedStatement ck = con.prepareStatement(
+                        "SELECT AccountID FROM Account WHERE AccountID = ?")) {
+                    ck.setString(1, user);
+                    if (!ck.executeQuery().next()) {
+                        JOptionPane.showMessageDialog(ProjectFrame.this,
+                                "No customer account found for '" + user + "'.\nContact an admin.",
+                                "Profile Not Found", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                } catch (SQLException ex) { ex.printStackTrace(); return; }
+
+                try (PreparedStatement ps = con.prepareStatement(
+                        "INSERT INTO CustomerQuestion (AccountID, Question) VALUES (?, ?)")) {
+                    ps.setString(1, user);
+                    ps.setString(2, q);
+                    ps.executeUpdate();
+                    taQuestion.setText("");
+                    loadMyQuestions();
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Your question has been submitted.\nA representative will reply shortly.",
+                            "Submitted", JOptionPane.INFORMATION_MESSAGE);
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Could not submit question: " + ex.getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        JPanel askPanel = new JPanel(new BorderLayout(8, 8));
+        askPanel.setOpaque(false);
+        askPanel.setBorder(BorderFactory.createTitledBorder("New Question"));
+        askPanel.add(inputScroll, BorderLayout.CENTER);
+        askPanel.add(btnSubmit, BorderLayout.EAST);
+
+        questionsCardsPanel = new JPanel();
+        questionsCardsPanel.setLayout(new BoxLayout(questionsCardsPanel, BoxLayout.Y_AXIS));
+        questionsCardsPanel.setBackground(new Color(242, 240, 230));
+        questionsCardsPanel.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0));
+
+        JScrollPane historyScroll = new JScrollPane(questionsCardsPanel);
+        historyScroll.setBorder(BorderFactory.createTitledBorder("My Question History"));
+        historyScroll.getVerticalScrollBar().setUnitIncrement(16);
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, askPanel, historyScroll);
+        split.setResizeWeight(0.28);
+        split.setDividerSize(6);
+
+        page.add(topPanel, BorderLayout.NORTH);
+        page.add(split, BorderLayout.CENTER);
+        return page;
+    }
+
+    private void loadMyQuestions() {
+        if (questionsCardsPanel == null) return;
+        questionsCardsPanel.removeAll();
+
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT QuestionID, Question, Answer, AskedAt, AnsweredAt, AnsweredBy, Status "
+                + "FROM CustomerQuestion WHERE AccountID = ? ORDER BY AskedAt DESC")) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean any = false;
+                while (rs.next()) {
+                    any = true;
+                    JPanel card = createQuestionCard(
+                            rs.getLong("QuestionID"),
+                            rs.getString("Question"),
+                            rs.getString("Answer"),
+                            rs.getTimestamp("AskedAt"),
+                            rs.getTimestamp("AnsweredAt"),
+                            rs.getString("AnsweredBy"),
+                            rs.getString("Status"));
+                    card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    questionsCardsPanel.add(card);
+                    questionsCardsPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+                }
+                if (!any) {
+                    JLabel none = new JLabel("You haven't asked any questions yet.");
+                    none.setFont(new Font("Lucida Sans", Font.ITALIC, 14));
+                    none.setBorder(BorderFactory.createEmptyBorder(20, 10, 0, 0));
+                    questionsCardsPanel.add(none);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JLabel err = new JLabel("Error: " + e.getMessage());
+            err.setForeground(Color.RED);
+            questionsCardsPanel.add(err);
+        }
+        questionsCardsPanel.revalidate();
+        questionsCardsPanel.repaint();
+    }
+
+    private JPanel createQuestionCard(long questionId, String question, String answer,
+            java.sql.Timestamp askedAt, java.sql.Timestamp answeredAt,
+            String answeredBy, String status) {
+        boolean answered = "answered".equalsIgnoreCase(status);
+        Color accent = answered ? new Color(0, 160, 0) : new Color(200, 130, 0);
+
+        JPanel card = new JPanel(new BorderLayout(12, 6));
+        card.setBackground(Color.WHITE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(accent, 4),
+                BorderFactory.createEmptyBorder(10, 14, 10, 14)));
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, answered ? 170 : 90));
+
+        JPanel badge = new JPanel(new BorderLayout());
+        badge.setPreferredSize(new Dimension(90, 0));
+        badge.setBackground(accent);
+        JLabel badgeLbl = new JLabel(answered ? "ANSWERED" : "OPEN", SwingConstants.CENTER);
+        badgeLbl.setForeground(Color.WHITE);
+        badgeLbl.setFont(new Font("Lucida Sans", Font.BOLD, 11));
+        badge.add(badgeLbl, BorderLayout.CENTER);
+
+        JPanel info = new JPanel();
+        info.setOpaque(false);
+        info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+
+        JLabel qLabel = new JLabel("<html><b>Q:</b> " + escapeHtml(question) + "</html>");
+        qLabel.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+
+        String askedStr = (askedAt != null) ? askedAt.toString().substring(0, 16) : "";
+        JLabel metaLabel = new JLabel("Asked: " + askedStr);
+        metaLabel.setFont(new Font("Lucida Sans", Font.ITALIC, 11));
+        metaLabel.setForeground(new Color(120, 120, 120));
+
+        info.add(qLabel);
+        info.add(Box.createRigidArea(new Dimension(0, 4)));
+        info.add(metaLabel);
+
+        if (answered && answer != null && !answer.isEmpty()) {
+            JLabel aLabel = new JLabel("<html><b>A:</b> " + escapeHtml(answer) + "</html>");
+            aLabel.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+            aLabel.setForeground(new Color(0, 100, 0));
+            String byStr = (answeredBy != null && !answeredBy.isEmpty()) ? " by " + answeredBy : "";
+            String answeredStr = (answeredAt != null) ? answeredAt.toString().substring(0, 16) : "";
+            JLabel answerMeta = new JLabel("Answered: " + answeredStr + byStr);
+            answerMeta.setFont(new Font("Lucida Sans", Font.ITALIC, 11));
+            answerMeta.setForeground(new Color(0, 120, 0));
+            info.add(Box.createRigidArea(new Dimension(0, 8)));
+            info.add(aLabel);
+            info.add(Box.createRigidArea(new Dimension(0, 2)));
+            info.add(answerMeta);
+        }
+
+        card.add(badge, BorderLayout.WEST);
+        card.add(info, BorderLayout.CENTER);
+        return card;
+    }
+
+    private void loadRepQuestions() {
+        if (repQuestionsTableModel == null) return;
+        repQuestionsTableModel.setRowCount(0);
+        repQuestionIds.clear();
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT QuestionID, AccountID, Question, AskedAt, Status "
+                + "FROM CustomerQuestion ORDER BY "
+                + "CASE Status WHEN 'open' THEN 0 ELSE 1 END, AskedAt ASC LIMIT 300")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    repQuestionIds.add(rs.getLong("QuestionID"));
+                    String preview = rs.getString("Question");
+                    if (preview != null && preview.length() > 65)
+                        preview = preview.substring(0, 62) + "…";
+                    repQuestionsTableModel.addRow(new Object[]{
+                        rs.getString("AccountID"),
+                        preview,
+                        rs.getTimestamp("AskedAt"),
+                        rs.getString("Status")
+                    });
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void replyToQuestion(long questionId) {
+        String questionText = "";
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT Question FROM CustomerQuestion WHERE QuestionID = ?")) {
+            ps.setLong(1, questionId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) questionText = rs.getString("Question");
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return;
+        }
+
+        Font dlgFont = new Font("Lucida Sans", Font.PLAIN, 14);
+        JDialog dialog = new JDialog(this, "Reply to Question", true);
+        dialog.setSize(620, 400);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10, 10));
+        dialog.getRootPane().setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+
+        JLabel qLabel = new JLabel("<html><b>Customer's question:</b><br/><br/>"
+                + escapeHtml(questionText) + "</html>");
+        qLabel.setFont(dlgFont);
+        qLabel.setBorder(BorderFactory.createTitledBorder("Question"));
+
+        JTextArea taAnswer = new JTextArea(6, 40);
+        taAnswer.setFont(dlgFont);
+        taAnswer.setLineWrap(true);
+        taAnswer.setWrapStyleWord(true);
+        JScrollPane answerScroll = new JScrollPane(taAnswer);
+        answerScroll.setBorder(BorderFactory.createTitledBorder("Your Answer"));
+
+        JButton btnSubmit = new JButton("Submit Answer");
+        btnSubmit.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnSubmit.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String answer = taAnswer.getText().trim();
+                if (answer.isEmpty()) {
+                    JOptionPane.showMessageDialog(dialog, "Please type an answer first.");
+                    return;
+                }
+                try (PreparedStatement ps = con.prepareStatement(
+                        "UPDATE CustomerQuestion "
+                        + "SET Answer = ?, AnsweredAt = NOW(), AnsweredBy = ?, Status = 'answered' "
+                        + "WHERE QuestionID = ?")) {
+                    ps.setString(1, answer);
+                    ps.setString(2, user);
+                    ps.setLong(3, questionId);
+                    ps.executeUpdate();
+                    dialog.dispose();
+                    loadRepQuestions();
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Answer submitted.", "Done", JOptionPane.INFORMATION_MESSAGE);
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                    JOptionPane.showMessageDialog(dialog, "Error: " + ex.getMessage());
+                }
+            }
+        });
+
+        JButton btnCancel = new JButton("Cancel");
+        btnCancel.setFont(dlgFont);
+        btnCancel.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { dialog.dispose(); }
+        });
+
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        btnRow.setOpaque(false);
+        btnRow.add(btnCancel);
+        btnRow.add(btnSubmit);
+
+        dialog.add(qLabel, BorderLayout.NORTH);
+        dialog.add(answerScroll, BorderLayout.CENTER);
+        dialog.add(btnRow, BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    private String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void showBookingForm(int rowIndex) {
