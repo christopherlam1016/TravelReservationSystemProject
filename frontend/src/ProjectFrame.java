@@ -464,7 +464,7 @@ public class ProjectFrame extends JFrame {
         repSection.add(lookupScroll);
 
         repQuestionsTableModel = new DefaultTableModel(
-                new String[]{"Account", "Question Preview", "Asked At", "Status"}, 0) {
+                new String[]{"Account", "Question Preview", "Answer", "Asked At", "Status"}, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         JTable repQuestionsTable = new JTable(repQuestionsTableModel);
@@ -1040,18 +1040,22 @@ public class ProjectFrame extends JFrame {
         repQuestionsTableModel.setRowCount(0);
         repQuestionIds.clear();
         try (PreparedStatement ps = con.prepareStatement(
-                "SELECT QuestionID, AccountID, Question, AskedAt, Status "
+                "SELECT QuestionID, AccountID, Question, Answer, AskedAt, Status "
                 + "FROM CustomerQuestion ORDER BY "
                 + "CASE Status WHEN 'open' THEN 0 ELSE 1 END, AskedAt ASC LIMIT 300")) {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     repQuestionIds.add(rs.getLong("QuestionID"));
                     String preview = rs.getString("Question");
-                    if (preview != null && preview.length() > 65)
-                        preview = preview.substring(0, 62) + "…";
+                    if (preview != null && preview.length() > 60)
+                        preview = preview.substring(0, 57) + "…";
+                    String answer = rs.getString("Answer");
+                    if (answer == null || answer.isEmpty()) answer = "—";
+                    else if (answer.length() > 60) answer = answer.substring(0, 57) + "…";
                     repQuestionsTableModel.addRow(new Object[]{
                         rs.getString("AccountID"),
                         preview,
+                        answer,
                         rs.getTimestamp("AskedAt"),
                         rs.getString("Status")
                     });
