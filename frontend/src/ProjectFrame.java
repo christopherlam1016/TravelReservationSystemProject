@@ -29,7 +29,24 @@ public class ProjectFrame extends JFrame {
     JTable flightTable;
     List<Long> flightRowIds = new ArrayList<>();
     DefaultTableModel flightTableModel;
-    DefaultTableModel bookingsTableModel;
+    JPanel dashboardPanel;
+    JPanel bookingsCardsPanel;
+    JPanel waitlistCardsPanel;
+    JPanel repSection;
+    JPanel adminSection;
+    JPanel lookupCardsPanel;
+    JComboBox<String> cbAccountLookup;
+    boolean suppressLookup = false;
+    JComboBox<String> cbSort;
+    JComboBox<String> cbAirlineFilter;
+    JComboBox<String> cbDepWindow;
+    JTextField tfMaxPrice;
+    DefaultTableModel usersTableModel;
+    DefaultTableModel allBookingsTableModel;
+    int loggedInCustomerId = -1;
+    JPanel questionsCardsPanel;
+    DefaultTableModel repQuestionsTableModel;
+    List<Long> repQuestionIds = new ArrayList<>();
 
     // Admin report components
     JComboBox<String> cbReportAirline;
@@ -102,17 +119,33 @@ public class ProjectFrame extends JFrame {
                     return;
                 }
 
-                // execute sql insert query for new user information
-                String instruction = "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)";
-                try (PreparedStatement ps = con.prepareStatement(instruction)) {
-                    ps.setString(1, newUser);
-                    ps.setString(2, passwd);
-                    ps.setString(3, "customer");
-                    int result = ps.executeUpdate();
-                    String s = "User " + newUser + " has been added (" + result + ")";
-                    msg.setText(s);
-                } catch (SQLException e1) {
-                    msg.setText("Unable to add new user: " + e1.getMessage());
+                boolean previousAutoCommit = true;
+                try {
+                    previousAutoCommit = con.getAutoCommit();
+                    con.setAutoCommit(false);
+
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)")) {
+                        ps.setString(1, newUser);
+                        ps.setString(2, passwd);
+                        ps.setString(3, "customer");
+                        ps.executeUpdate();
+                    }
+
+                    if (!createCustomerAccountForUser(newUser)) {
+                        con.rollback();
+                        return;
+                    }
+
+                    con.commit();
+                    tfuser.setText("");
+                    tfpasswd.setText("");
+                    msg.setText("User " + newUser + " has been created successfully!");
+                } catch (SQLException ex) {
+                    try { con.rollback(); } catch (SQLException ignored) { }
+                    msg.setText("Unable to add new user: " + ex.getMessage());
+                } finally {
+                    try { con.setAutoCommit(previousAutoCommit); } catch (SQLException ignored) { }
                 }
             }
         });
@@ -150,8 +183,14 @@ public class ProjectFrame extends JFrame {
                         userLoggedin = true;
                         msg.setText(s);
                         loginStatus.setText("Logged in as: " + user + " (Role: " + userRole + ")");
+                        try (PreparedStatement psAcc = con.prepareStatement(
+                                "SELECT CustomerID FROM Account WHERE AccountID = ?")) {
+                            psAcc.setString(1, user);
+                            ResultSet rsAcc = psAcc.executeQuery();
+                            loggedInCustomerId = rsAcc.next() ? rsAcc.getInt("CustomerID") : -1;
+                        } catch (SQLException ignored) { loggedInCustomerId = -1; }
                         updateDashboardInfo();
-                        loadFlights("", "", "");
+                        loadFlights();
                         cardLayout.show(rootPanel, "dashboard");
                     } else {
                         String s = "Unknown user: invalid username or password";
@@ -180,6 +219,7 @@ public class ProjectFrame extends JFrame {
                 userLoggedin = false;
                 user = "";
                 userRole = "guest";
+                loggedInCustomerId = -1;
                 loginStatus.setText("Not logged in (Current Role: guest)");
             }
         });
@@ -218,6 +258,8 @@ public class ProjectFrame extends JFrame {
         rootPanel.add(buildBookingPanel(), "booking");
         rootPanel.add(buildConfirmationPanel(), "confirmation");
         rootPanel.add(buildAdminReportsPanel(), "adminReports"); // Megan added
+        rootPanel.add(buildMyBookingsPanel(), "myBookings");
+        rootPanel.add(buildMyQuestionsPanel(), "myQuestions");
 
         // -- Add the mainPanel to our JForm and set up basic attributes
         this.add(rootPanel);
@@ -229,7 +271,7 @@ public class ProjectFrame extends JFrame {
     }
 
     private JPanel buildDashboardPanel() {
-        JPanel dashboardPanel = new JPanel(new BorderLayout(10, 10));
+        dashboardPanel = new JPanel(new BorderLayout(10, 10));
         dashboardPanel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
         dashboardPanel.setBackground(new Color(242, 240, 230));
 
@@ -242,6 +284,7 @@ public class ProjectFrame extends JFrame {
                 userLoggedin = false;
                 user = "";
                 userRole = "guest";
+                loggedInCustomerId = -1;
                 tfuser.setText("");
                 tfpasswd.setText("");
                 msg.setText("");
@@ -281,53 +324,7 @@ public class ProjectFrame extends JFrame {
         customerPanel.setBorder(BorderFactory.createTitledBorder("Customer Information"));
         customerPanel.add(customerInfoLabel, BorderLayout.CENTER);
 
-        String[] airports = {
-                "Any",
-                "ATL - Hartsfield-Jackson Atlanta",
-                "LAX - Los Angeles International",
-                "ORD - O'Hare International (Chicago)",
-                "DFW - Dallas/Fort Worth International",
-                "DEN - Denver International",
-                "JFK - John F. Kennedy International (New York)",
-                "SFO - San Francisco International",
-                "SEA - Seattle-Tacoma International",
-                "LAS - Harry Reid International (Las Vegas)",
-                "MCO - Orlando International",
-                "EWR - Newark Liberty International",
-                "MIA - Miami International",
-                "PHX - Phoenix Sky Harbor International",
-                "IAH - George Bush Intercontinental (Houston)",
-                "BOS - Logan International (Boston)",
-                "MSP - Minneapolis-Saint Paul International",
-                "DTW - Detroit Metropolitan Wayne County",
-                "PHL - Philadelphia International",
-                "LGA - LaGuardia (New York)",
-                "CLT - Charlotte Douglas International",
-                "SLC - Salt Lake City International",
-                "BWI - Baltimore/Washington International",
-                "SAN - San Diego International",
-                "MDW - Chicago Midway International",
-                "TPA - Tampa International",
-                "HNL - Daniel K. Inouye International (Honolulu)",
-                "PDX - Portland International",
-                "STL - St. Louis Lambert International",
-                "BNA - Nashville International",
-                "AUS - Austin-Bergstrom International",
-                "MCI - Kansas City International",
-                "RDU - Raleigh-Durham International",
-                "FLL - Fort Lauderdale-Hollywood International",
-                "OAK - Oakland International",
-                "SMF - Sacramento International",
-                "SJC - Norman Y. Mineta San Jose International",
-                "ABQ - Albuquerque International Sunport",
-                "MSY - Louis Armstrong New Orleans International",
-                "JAX - Jacksonville International",
-                "IND - Indianapolis International",
-                "PIT - Pittsburgh International",
-                "CMH - John Glenn Columbus International",
-                "CLE - Cleveland Hopkins International",
-                "MKE - General Mitchell International (Milwaukee)"
-        };
+        String[] airports = airportList();
 
         Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 14);
 
@@ -340,43 +337,63 @@ public class ProjectFrame extends JFrame {
         tfDate.setFont(fieldFont);
         tfDate.setToolTipText("Enter date as yyyy-MM-dd, or leave blank for all dates");
 
-        JPanel searchPanel = new JPanel(new GridLayout(2, 4, 8, 8));
+        cbSort = new JComboBox<>(new String[]{
+            "Departure Time ↑", "Departure Time ↓",
+            "Price ↑", "Price ↓",
+            "Duration ↑", "Duration ↓",
+            "Arrival Time ↑", "Arrival Time ↓"
+        });
+        cbSort.setFont(fieldFont);
+
+        cbAirlineFilter = new JComboBox<>();
+        cbAirlineFilter.setFont(fieldFont);
+
+        tfMaxPrice = new JTextField();
+        tfMaxPrice.setFont(fieldFont);
+        tfMaxPrice.setToolTipText("Max price, e.g. 300 — leave blank for no limit");
+
+        cbDepWindow = new JComboBox<>(new String[]{
+            "Any Time", "Morning (6am – 12pm)", "Afternoon (12pm – 6pm)", "Evening (6pm – midnight)"
+        });
+        cbDepWindow.setFont(fieldFont);
+
+        JPanel searchPanel = new JPanel(new GridLayout(4, 4, 8, 6));
         searchPanel.setOpaque(false);
         searchPanel.setBorder(BorderFactory.createTitledBorder("Explore Flights"));
+
         JLabel lbFrom = new JLabel("From Airport");
         JLabel lbTo = new JLabel("To Airport");
-        JLabel lbDate = new JLabel("Date (yyyy-MM-dd or blank)");
-        JLabel lbBlank = new JLabel();
+        JLabel lbDate = new JLabel("Date (yyyy-MM-dd)");
+        JLabel lbSort = new JLabel("Sort By");
+        JLabel lbAirline = new JLabel("Airline");
+        JLabel lbMaxPrice = new JLabel("Max Price ($)");
+        JLabel lbDepWindow = new JLabel("Time of Day");
         JButton btnSearchFlights = new JButton("Search Flights");
 
         lbFrom.setFont(fieldFont);
         lbTo.setFont(fieldFont);
-        lbDate.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
+        lbDate.setFont(fieldFont);
+        lbSort.setFont(fieldFont);
+        lbAirline.setFont(fieldFont);
+        lbMaxPrice.setFont(fieldFont);
+        lbDepWindow.setFont(fieldFont);
         btnSearchFlights.setFont(new Font("Lucida Sans", Font.BOLD, 14));
 
         btnSearchFlights.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 dashboardStatus.setText(" ");
-                String fromSel = cbFrom.getSelectedItem().toString();
-                String toSel = cbTo.getSelectedItem().toString();
-                String fromCode = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
-                String toCode = toSel.equals("Any") ? "" : toSel.substring(0, 3);
-                loadFlights(fromCode, toCode, tfDate.getText().trim());
+                loadFlights();
             }
         });
 
-        searchPanel.add(lbFrom);
-        searchPanel.add(lbTo);
-        searchPanel.add(lbDate);
-        searchPanel.add(lbBlank);
-        searchPanel.add(cbFrom);
-        searchPanel.add(cbTo);
-        searchPanel.add(tfDate);
-        searchPanel.add(btnSearchFlights);
+        searchPanel.add(lbFrom);         searchPanel.add(lbTo);        searchPanel.add(lbDate);       searchPanel.add(lbSort);
+        searchPanel.add(cbFrom);         searchPanel.add(cbTo);        searchPanel.add(tfDate);       searchPanel.add(cbSort);
+        searchPanel.add(lbAirline);      searchPanel.add(lbMaxPrice);  searchPanel.add(lbDepWindow);  searchPanel.add(new JLabel());
+        searchPanel.add(cbAirlineFilter);searchPanel.add(tfMaxPrice);  searchPanel.add(cbDepWindow);  searchPanel.add(btnSearchFlights);
 
         flightTableModel = new DefaultTableModel(
-                new String[] { "Flight #", "Airline", "From", "To", "Departure", "Arrival", "Type" }, 0) {
+                new String[] { "Flight #", "Airline", "From", "To", "Departure", "Arrival", "Duration", "Price ($)", "Type", "Operates" }, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
@@ -406,7 +423,7 @@ public class ProjectFrame extends JFrame {
         searchPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
         tableScrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
         customerPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
-        searchPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 140));
+        searchPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, 220));
         tableScrollPane.setPreferredSize(new Dimension(800, 260));
         tableScrollPane.setMinimumSize(new Dimension(350, 180));
         centerPanel.add(customerPanel);
@@ -415,43 +432,383 @@ public class ProjectFrame extends JFrame {
         centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
         centerPanel.add(tableScrollPane);
 
-        bookingsTableModel = new DefaultTableModel(
-                new String[] { "Ticket ID", "Type", "Class", "Status", "Seat",
-                        "Dep. Date", "Flight #", "Airline", "From", "To" },
-                0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        JTable bookingsTable = new JTable(bookingsTableModel);
-        bookingsTable.setRowHeight(22);
-        JScrollPane bookingsScrollPane = new JScrollPane(bookingsTable);
-        bookingsScrollPane.setBorder(BorderFactory.createTitledBorder("My Bookings"));
-        bookingsScrollPane.setPreferredSize(new Dimension(800, 180));
-        bookingsScrollPane.setMinimumSize(new Dimension(350, 120));
-
-        JButton btnLoadBookings = new JButton("Load My Bookings");
-        btnLoadBookings.setFont(new Font("Lucida Sans", Font.BOLD, 14));
-        btnLoadBookings.addActionListener(new ActionListener() {
+        JButton btnViewBookings = new JButton("View My Bookings");
+        btnViewBookings.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnViewBookings.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnViewBookings.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 loadMyBookings();
+                cardLayout.show(rootPanel, "myBookings");
             }
         });
 
-        JPanel bookingsPanel = new JPanel();
-        bookingsPanel.setOpaque(false);
-        bookingsPanel.setLayout(new BoxLayout(bookingsPanel, BoxLayout.Y_AXIS));
-        bookingsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        btnLoadBookings.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bookingsScrollPane.setAlignmentX(Component.LEFT_ALIGNMENT);
-        bookingsPanel.add(btnLoadBookings);
-        bookingsPanel.add(Box.createRigidArea(new Dimension(0, 4)));
-        bookingsPanel.add(bookingsScrollPane);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+        centerPanel.add(btnViewBookings);
+
+        JButton btnAskQuestion = new JButton("Ask a Question");
+        btnAskQuestion.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnAskQuestion.setAlignmentX(Component.LEFT_ALIGNMENT);
+        btnAskQuestion.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                loadMyQuestions();
+                cardLayout.show(rootPanel, "myQuestions");
+            }
+        });
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 6)));
+        centerPanel.add(btnAskQuestion);
+
+        // ── Rep section: Customer Lookup ──────────────────────────────────────
+        repSection = new JPanel();
+        repSection.setOpaque(false);
+        repSection.setLayout(new BoxLayout(repSection, BoxLayout.Y_AXIS));
+        repSection.setBorder(BorderFactory.createTitledBorder("Customer Lookup  (Rep & Admin)"));
+        repSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+        repSection.setVisible(false);
+
+        JPanel lookupRow = new JPanel(new BorderLayout(8, 0));
+        lookupRow.setOpaque(false);
+        lookupRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        lookupRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel lbLookup = new JLabel("Customer: ");
+        lbLookup.setFont(fieldFont);
+        cbAccountLookup = new JComboBox<>();
+        cbAccountLookup.setFont(fieldFont);
+        cbAccountLookup.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                if (suppressLookup) return;
+                Object sel = cbAccountLookup.getSelectedItem();
+                if (sel != null && !sel.toString().isEmpty()) {
+                    String accountId = sel.toString().split(" — ")[0].trim();
+                    loadCustomerLookup(accountId);
+                }
+            }
+        });
+        JButton btnRefreshDropdown = new JButton("↻ Refresh List");
+        btnRefreshDropdown.setFont(fieldFont);
+        btnRefreshDropdown.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                refreshAccountDropdown();
+            }
+        });
+        lookupRow.add(lbLookup, BorderLayout.WEST);
+        lookupRow.add(cbAccountLookup, BorderLayout.CENTER);
+        lookupRow.add(btnRefreshDropdown, BorderLayout.EAST);
+
+        lookupCardsPanel = new JPanel();
+        lookupCardsPanel.setOpaque(false);
+        lookupCardsPanel.setLayout(new BoxLayout(lookupCardsPanel, BoxLayout.Y_AXIS));
+
+        JScrollPane lookupScroll = new JScrollPane(lookupCardsPanel);
+        lookupScroll.setPreferredSize(new Dimension(800, 200));
+        lookupScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+        lookupScroll.setBorder(BorderFactory.createEmptyBorder());
+
+        repSection.add(lookupRow);
+        repSection.add(Box.createRigidArea(new Dimension(0, 6)));
+        repSection.add(lookupScroll);
+
+        repQuestionsTableModel = new DefaultTableModel(
+                new String[]{"Account", "Question Preview", "Answer", "Asked At", "Status"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        JTable repQuestionsTable = new JTable(repQuestionsTableModel);
+        repQuestionsTable.setRowHeight(22);
+        repQuestionsTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        JScrollPane repQScroll = new JScrollPane(repQuestionsTable);
+        repQScroll.setBorder(BorderFactory.createTitledBorder("Customer Questions"));
+        repQScroll.setPreferredSize(new Dimension(800, 150));
+        repQScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JButton btnLoadQs = new JButton("↻ Refresh Questions");
+        btnLoadQs.setFont(fieldFont);
+        JButton btnReply = new JButton("Reply to Selected");
+        btnReply.setFont(fieldFont);
+        btnLoadQs.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { loadRepQuestions(); }
+        });
+        btnReply.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int row = repQuestionsTable.getSelectedRow();
+                if (row < 0 || row >= repQuestionIds.size()) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this, "Select a question row first.");
+                    return;
+                }
+                replyToQuestion(repQuestionIds.get(row));
+            }
+        });
+
+        JPanel repQBtnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        repQBtnRow.setOpaque(false);
+        repQBtnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        repQBtnRow.add(btnLoadQs);
+        repQBtnRow.add(btnReply);
+
+        repSection.add(Box.createRigidArea(new Dimension(0, 10)));
+        repSection.add(repQScroll);
+        repSection.add(Box.createRigidArea(new Dimension(0, 4)));
+        repSection.add(repQBtnRow);
+
+        // ── Admin section: User Management + All Bookings ─────────────────────
+        adminSection = new JPanel();
+        adminSection.setOpaque(false);
+        adminSection.setLayout(new BoxLayout(adminSection, BoxLayout.Y_AXIS));
+        adminSection.setBorder(BorderFactory.createTitledBorder("Administration  (Admin Only)"));
+        adminSection.setAlignmentX(Component.LEFT_ALIGNMENT);
+        adminSection.setVisible(false);
+
+        usersTableModel = new DefaultTableModel(
+                new String[]{"Username", "Role", "Created At"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        JTable usersTable = new JTable(usersTableModel);
+        usersTable.setRowHeight(22);
+        usersTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        JScrollPane usersScroll = new JScrollPane(usersTable);
+        usersScroll.setBorder(BorderFactory.createTitledBorder("Users"));
+        usersScroll.setPreferredSize(new Dimension(800, 130));
+        usersScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JTextField tfNewUser = new JTextField();
+        JPasswordField tfNewPass = new JPasswordField();
+        JComboBox<String> cbNewRole = new JComboBox<>(new String[]{"customer", "rep", "admin"});
+        JButton btnAddUserAdmin  = new JButton("Add User");
+        JButton btnDelUser      = new JButton("Delete Selected");
+        JButton btnEditRole     = new JButton("Edit Role");
+        JButton btnRefreshUsers = new JButton("Refresh");
+        tfNewUser.setFont(fieldFont);
+        tfNewPass.setFont(fieldFont);
+        cbNewRole.setFont(fieldFont);
+        btnAddUserAdmin.setFont(fieldFont);
+        btnDelUser.setFont(fieldFont);
+        btnEditRole.setFont(fieldFont);
+        btnRefreshUsers.setFont(fieldFont);
+
+        JPanel userCtrlRow = new JPanel(new GridLayout(2, 4, 8, 4));
+        userCtrlRow.setOpaque(false);
+        userCtrlRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 72));
+        userCtrlRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel lbNu = new JLabel("New Username"); lbNu.setFont(fieldFont);
+        JLabel lbNp = new JLabel("Password");     lbNp.setFont(fieldFont);
+        JLabel lbNr = new JLabel("Role");         lbNr.setFont(fieldFont);
+        userCtrlRow.add(lbNu);  userCtrlRow.add(lbNp);  userCtrlRow.add(lbNr);
+        userCtrlRow.add(btnRefreshUsers);
+        userCtrlRow.add(tfNewUser); userCtrlRow.add(tfNewPass);
+        userCtrlRow.add(cbNewRole); userCtrlRow.add(btnAddUserAdmin);
+
+        btnAddUserAdmin.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String newU = tfNewUser.getText().trim();
+                String newP = new String(tfNewPass.getPassword()).trim();
+                String newR = cbNewRole.getSelectedItem().toString();
+                if (newU.isEmpty() || newP.isEmpty()) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this, "Username and password required.");
+                    return;
+                }
+                boolean previousAutoCommit = true;
+                try {
+                    previousAutoCommit = con.getAutoCommit();
+                    con.setAutoCommit(false);
+
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, ?)")) {
+                        ps.setString(1, newU);
+                        ps.setString(2, newP);
+                        ps.setString(3, newR);
+                        ps.executeUpdate();
+                    }
+
+                    if ("customer".equals(newR)) {
+                        if (!createCustomerAccountForUser(newU)) {
+                            con.rollback();
+                            return;
+                        }
+                    }
+
+                    con.commit();
+                    tfNewUser.setText(""); tfNewPass.setText("");
+                    loadAllUsers();
+                } catch (SQLException ex) {
+                    try { con.rollback(); } catch (SQLException ignored) { }
+                    if (ex.getErrorCode() == 1062) {
+                        JOptionPane.showMessageDialog(ProjectFrame.this,
+                                "Username '" + newU + "' already exists.");
+                    } else {
+                        JOptionPane.showMessageDialog(ProjectFrame.this, "Error: " + ex.getMessage());
+                    }
+                } finally {
+                    try { con.setAutoCommit(previousAutoCommit); } catch (SQLException ignored) { }
+                }
+            }
+        });
+
+        btnDelUser.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int row = usersTable.getSelectedRow();
+                if (row < 0) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this, "Select a user row first.");
+                    return;
+                }
+                String target = usersTableModel.getValueAt(row, 0).toString();
+                if (target.equals(user)) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "You cannot delete your own account.");
+                    return;
+                }
+                int choice = JOptionPane.showConfirmDialog(ProjectFrame.this,
+                        "Delete user '" + target + "'?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
+                if (choice == JOptionPane.YES_OPTION) {
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "DELETE FROM users WHERE `user` = ?")) {
+                        ps.setString(1, target);
+                        ps.executeUpdate();
+                        loadAllUsers();
+                    } catch (SQLException ex) {
+                        JOptionPane.showMessageDialog(ProjectFrame.this,
+                                "Delete failed: " + ex.getMessage());
+                    }
+                }
+            }
+        });
+
+        btnRefreshUsers.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { loadAllUsers(); }
+        });
+
+        btnEditRole.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                int row = usersTable.getSelectedRow();
+                if (row < 0) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this, "Select a user row first.");
+                    return;
+                }
+                String targetUser  = usersTableModel.getValueAt(row, 0).toString();
+                String currentRole = usersTableModel.getValueAt(row, 1).toString();
+
+                JComboBox<String> roleBox = new JComboBox<>(new String[]{"customer", "rep", "admin"});
+                roleBox.setSelectedItem(currentRole);
+                roleBox.setFont(fieldFont);
+
+                int result = JOptionPane.showConfirmDialog(ProjectFrame.this, roleBox,
+                        "Change role for \"" + targetUser + "\"",
+                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                if (result != JOptionPane.OK_OPTION) return;
+
+                String newRole = roleBox.getSelectedItem().toString();
+                if (newRole.equals(currentRole)) return;
+
+                // Block demoting the last admin
+                if ("admin".equals(currentRole) && !"admin".equals(newRole)) {
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "SELECT COUNT(*) FROM users WHERE role = 'admin'")) {
+                        ResultSet rs = ps.executeQuery();
+                        rs.next();
+                        if (rs.getInt(1) <= 1) {
+                            JOptionPane.showMessageDialog(ProjectFrame.this,
+                                    "Cannot demote the last admin account.\n"
+                                    + "Promote another user to admin first.");
+                            return;
+                        }
+                    } catch (SQLException ex) { ex.printStackTrace(); return; }
+                }
+
+                try (PreparedStatement ps = con.prepareStatement(
+                        "UPDATE users SET role = ? WHERE `user` = ?")) {
+                    ps.setString(1, newRole);
+                    ps.setString(2, targetUser);
+                    ps.executeUpdate();
+                    loadAllUsers();
+                    if (targetUser.equals(user)) {
+                        userRole = newRole;
+                        updateDashboardInfo();
+                    }
+                } catch (SQLException ex) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Update failed: " + ex.getMessage());
+                }
+            }
+        });
+
+        JPanel delBtnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        delBtnRow.setOpaque(false);
+        delBtnRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        delBtnRow.add(btnDelUser);
+        delBtnRow.add(btnEditRole);
+
+        allBookingsTableModel = new DefaultTableModel(
+                new String[]{"Account", "Customer", "Route", "Flight #", "Class", "Status", "Dep. Date"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        JTable allBookingsTable = new JTable(allBookingsTableModel);
+        allBookingsTable.setRowHeight(22);
+        JScrollPane allBookingsScroll = new JScrollPane(allBookingsTable);
+        allBookingsScroll.setBorder(BorderFactory.createTitledBorder("Reservations"));
+        allBookingsScroll.setPreferredSize(new Dimension(800, 160));
+        allBookingsScroll.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JTextField tfSearchFlightNum = new JTextField(10);
+        JTextField tfSearchCustomerName = new JTextField(15);
+        tfSearchFlightNum.setFont(fieldFont);
+        tfSearchCustomerName.setFont(fieldFont);
+        tfSearchFlightNum.setToolTipText("Enter flight number");
+        tfSearchCustomerName.setToolTipText("Enter customer first or last name");
+
+        JButton btnLoadAllBookings = new JButton("Load All");
+        JButton btnSearchBookings = new JButton("Search");
+        JButton btnClearSearch = new JButton("Clear");
+        btnLoadAllBookings.setFont(fieldFont);
+        btnSearchBookings.setFont(fieldFont);
+        btnClearSearch.setFont(fieldFont);
+        btnLoadAllBookings.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        btnLoadAllBookings.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { loadAllBookings(); }
+        });
+        btnSearchBookings.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { 
+                String flightNum = tfSearchFlightNum.getText().trim();
+                String customerName = tfSearchCustomerName.getText().trim();
+                searchReservations(flightNum, customerName);
+            }
+        });
+        btnClearSearch.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { 
+                tfSearchFlightNum.setText("");
+                tfSearchCustomerName.setText("");
+                loadAllBookings();
+            }
+        });
+
+        JPanel searchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        searchRow.setOpaque(false);
+        searchRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 50));
+        searchRow.add(new JLabel("Flight #:"));
+        searchRow.add(tfSearchFlightNum);
+        searchRow.add(new JLabel("Customer Name:"));
+        searchRow.add(tfSearchCustomerName);
+        searchRow.add(btnSearchBookings);
+        searchRow.add(btnClearSearch);
+
+        JPanel bookingsBtnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        bookingsBtnRow.setOpaque(false);
+        bookingsBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+        bookingsBtnRow.add(btnLoadAllBookings);
+
+        adminSection.add(usersScroll);
+        adminSection.add(Box.createRigidArea(new Dimension(0, 4)));
+        adminSection.add(userCtrlRow);
+        adminSection.add(Box.createRigidArea(new Dimension(0, 2)));
+        adminSection.add(delBtnRow);
+        adminSection.add(Box.createRigidArea(new Dimension(0, 10)));
+        adminSection.add(searchRow);
+        adminSection.add(bookingsBtnRow);
+        adminSection.add(Box.createRigidArea(new Dimension(0, 4)));
+        adminSection.add(allBookingsScroll);
 
         centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
-        centerPanel.add(bookingsPanel);
+        centerPanel.add(repSection);
+        centerPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+        centerPanel.add(adminSection);
 
         JScrollPane dashboardScrollPane = new JScrollPane(centerPanel);
         dashboardScrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -465,51 +822,118 @@ public class ProjectFrame extends JFrame {
 
     private void updateDashboardInfo() {
         dashboardHeader.setText("Logged in as " + user + " (Role: " + userRole + ")");
-        customerInfoLabel.setText(
-                "<html><b>Username:</b> " + user + "<br/><b>Role:</b> " + userRole
-                        + "<br/><b>Reservation portfolio:</b> Coming next (past/upcoming trips).</html>");
+        
+        StringBuilder infoText = new StringBuilder("<html><b>Username:</b> " + user
+                + "<br/><b>Role:</b> " + userRole);
+        
+        if ("customer".equals(userRole) && loggedInCustomerId >= 0) {
+            try (PreparedStatement ps = con.prepareStatement(
+                    "SELECT FirstName, LastName, Email, Phone FROM Customer WHERE CustomerID = ?")) {
+                ps.setInt(1, loggedInCustomerId);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    String firstName = rs.getString("FirstName");
+                    String lastName = rs.getString("LastName");
+                    String email = rs.getString("Email");
+                    String phone = rs.getString("Phone");
+                    
+                    if (firstName != null && lastName != null) {
+                        infoText.append("<br/><b>Name:</b> ").append(firstName).append(" ").append(lastName);
+                    }
+                    if (email != null && !email.isEmpty()) {
+                        infoText.append("<br/><b>Email:</b> ").append(email);
+                    }
+                    if (phone != null && !phone.isEmpty()) {
+                        infoText.append("<br/><b>Phone:</b> ").append(phone);
+                    }
+                }
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+            }
+        }
+        
+        infoText.append("</html>");
+        customerInfoLabel.setText(infoText.toString());
+        
+        if ("admin".equals(userRole)) {
+            dashboardPanel.setBackground(new Color(255, 200, 200));
+        } else if ("rep".equals(userRole)) {
+            dashboardPanel.setBackground(new Color(200, 220, 255));
+        } else {
+            dashboardPanel.setBackground(new Color(242, 240, 230));
+        }
+        
+        boolean isRep   = "rep".equals(userRole) || "admin".equals(userRole);
+        boolean isAdmin = "admin".equals(userRole);
+        if (repSection   != null) repSection.setVisible(isRep);
+        if (adminSection != null) adminSection.setVisible(isAdmin);
+        if (isRep)   { refreshAccountDropdown(); loadRepQuestions(); }
+        if (isAdmin) loadAllUsers();
+        loadAirlineFilter();
     }
 
-    private void loadFlights(String fromAirport, String toAirport, String flightDate) {
-        if (flightTableModel == null) {
-            return;
-        }
-
+    private void loadFlights() {
+        if (flightTableModel == null) return;
         flightTableModel.setRowCount(0);
         flightRowIds.clear();
-        String sql = "SELECT FlightID, FlightNumber, Airline_Name, DepartureAirport, ArrivalAirport, "
-                + "DepartureTime, ArrivalTime, Travel_Type FROM Flight WHERE 1=1";
 
-        boolean filterFrom = fromAirport != null && !fromAirport.trim().isEmpty();
-        boolean filterTo = toAirport != null && !toAirport.trim().isEmpty();
-        boolean filterDate = flightDate != null && !flightDate.trim().isEmpty();
+        String fromSel    = (cbFrom == null) ? "Any" : cbFrom.getSelectedItem().toString();
+        String toSel      = (cbTo   == null) ? "Any" : cbTo.getSelectedItem().toString();
+        String flightDate = (tfDate == null) ? "" : tfDate.getText().trim();
+        String fromCode   = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
+        String toCode     = toSel.equals("Any")   ? "" : toSel.substring(0, 3);
 
-        if (filterFrom) {
-            sql += " AND DepartureAirport = ?";
-        }
-        if (filterTo) {
-            sql += " AND ArrivalAirport = ?";
-        }
-        if (filterDate) {
-            sql += " AND DATE(DepartureTime) = ?";
-        }
-        sql += " ORDER BY DepartureTime LIMIT 100";
+        String maxPriceStr = (tfMaxPrice == null) ? "" : tfMaxPrice.getText().trim();
+        boolean filterPrice = !maxPriceStr.isEmpty();
+
+        String airlineSel    = (cbAirlineFilter == null) ? "All Airlines"
+                                : cbAirlineFilter.getSelectedItem().toString();
+        boolean filterAirline = !"All Airlines".equals(airlineSel);
+        String airlineCode    = filterAirline ? airlineSel.substring(0, 2) : "";
+
+        String windowSel    = (cbDepWindow == null) ? "Any Time"
+                               : cbDepWindow.getSelectedItem().toString();
+        String windowClause = depWindowToSql(windowSel);
+
+        boolean filterFrom = !fromCode.isEmpty();
+        boolean filterTo   = !toCode.isEmpty();
+        boolean filterDate = !flightDate.isEmpty();
+
+        String sql = "SELECT f.FlightID, f.FlightNumber, f.Airline_Name, f.DepartureAirport, "
+                + "f.ArrivalAirport, f.DepartureTime, f.ArrivalTime, f.Travel_Type, f.BaseFare, "
+                + "TIMESTAMPDIFF(MINUTE, f.DepartureTime, f.ArrivalTime) AS DurationMin, "
+                + "GROUP_CONCAT(fod.DayOfWeek ORDER BY "
+                + "FIELD(fod.DayOfWeek,'Mon','Tue','Wed','Thu','Fri','Sat','Sun') "
+                + "SEPARATOR '/') AS OperatingDays "
+                + "FROM Flight f "
+                + "LEFT JOIN FlightOperatingDay fod ON f.FlightID = fod.FlightID "
+                + "WHERE 1=1";
+
+        if (filterFrom)    sql += " AND f.DepartureAirport = ?";
+        if (filterTo)      sql += " AND f.ArrivalAirport = ?";
+        if (filterDate)    sql += " AND DATE(f.DepartureTime) = ?";
+        if (filterPrice)   sql += " AND f.BaseFare <= ?";
+        if (filterAirline) sql += " AND f.AirlineID = ?";
+        if (windowClause != null) sql += windowClause;
+
+        sql += " GROUP BY f.FlightID, f.FlightNumber, f.Airline_Name, f.DepartureAirport, "
+             + "f.ArrivalAirport, f.DepartureTime, f.ArrivalTime, f.Travel_Type, f.BaseFare"
+             + " ORDER BY " + sortToSql() + " LIMIT 100";
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
             int idx = 1;
-            if (filterFrom) {
-                ps.setString(idx++, fromAirport.trim());
-            }
-            if (filterTo) {
-                ps.setString(idx++, toAirport.trim());
-            }
-            if (filterDate) {
-                ps.setString(idx++, flightDate.trim());
-            }
+            if (filterFrom)    ps.setString(idx++, fromCode);
+            if (filterTo)      ps.setString(idx++, toCode);
+            if (filterDate)    ps.setString(idx++, flightDate);
+            if (filterPrice)   ps.setDouble(idx++, Double.parseDouble(maxPriceStr));
+            if (filterAirline) ps.setString(idx++, airlineCode);
 
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     flightRowIds.add(rs.getLong("FlightID"));
+                    int    durMin = rs.getInt("DurationMin");
+                    String durStr = (durMin / 60) + "h " + (durMin % 60) + "m";
+                    String days   = rs.getString("OperatingDays");
                     flightTableModel.addRow(new Object[] {
                             rs.getInt("FlightNumber"),
                             rs.getString("Airline_Name"),
@@ -517,28 +941,392 @@ public class ProjectFrame extends JFrame {
                             rs.getString("ArrivalAirport"),
                             rs.getTimestamp("DepartureTime"),
                             rs.getTimestamp("ArrivalTime"),
-                            rs.getString("Travel_Type")
+                            durStr,
+                            String.format("$%.2f", rs.getDouble("BaseFare")),
+                            rs.getString("Travel_Type"),
+                            days != null ? days : "—"
                     });
                 }
             }
+        } catch (NumberFormatException nfe) {
+            dashboardStatus.setText("Invalid max price — enter a number (e.g. 300).");
         } catch (SQLException e) {
             e.printStackTrace();
             dashboardStatus.setText("Error loading flights: " + e.getMessage());
         }
     }
 
+    private String sortToSql() {
+        if (cbSort == null) return "f.DepartureTime ASC";
+        switch (cbSort.getSelectedItem().toString()) {
+            case "Departure Time ↓": return "f.DepartureTime DESC";
+            case "Price ↑":          return "f.BaseFare ASC";
+            case "Price ↓":          return "f.BaseFare DESC";
+            case "Duration ↑":       return "DurationMin ASC";
+            case "Duration ↓":       return "DurationMin DESC";
+            case "Arrival Time ↑":   return "f.ArrivalTime ASC";
+            case "Arrival Time ↓":   return "f.ArrivalTime DESC";
+            default:                 return "f.DepartureTime ASC";
+        }
+    }
+
+    private String depWindowToSql(String windowSel) {
+        switch (windowSel) {
+            case "Morning (6am – 12pm)":     return " AND HOUR(f.DepartureTime) BETWEEN 6 AND 11";
+            case "Afternoon (12pm – 6pm)":   return " AND HOUR(f.DepartureTime) BETWEEN 12 AND 17";
+            case "Evening (6pm – midnight)": return " AND HOUR(f.DepartureTime) BETWEEN 18 AND 23";
+            default:                         return null;
+        }
+    }
+
+    private void loadAirlineFilter() {
+        if (cbAirlineFilter == null) return;
+        Object prev = cbAirlineFilter.getSelectedItem();
+        cbAirlineFilter.removeAllItems();
+        cbAirlineFilter.addItem("All Airlines");
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT AirlineID, AirlineName FROM AirlineCompany ORDER BY AirlineName")) {
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                cbAirlineFilter.addItem(
+                        rs.getString("AirlineID") + " — " + rs.getString("AirlineName"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        if (prev != null) cbAirlineFilter.setSelectedItem(prev);
+    }
+
+    // ── Q&A: build customer "My Questions" card panel ─────────────────────────
+
+    private JPanel buildMyQuestionsPanel() {
+        JPanel page = new JPanel(new BorderLayout(10, 10));
+        page.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+        page.setBackground(new Color(242, 240, 230));
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        JButton btnBack = new JButton("← Back to Dashboard");
+        btnBack.setFont(fieldFont);
+        btnBack.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                cardLayout.show(rootPanel, "dashboard");
+            }
+        });
+
+        JLabel title = new JLabel("Ask a Representative");
+        title.setFont(new Font("Lucida Sans", Font.BOLD, 20));
+
+        JPanel topPanel = new JPanel(new BorderLayout(10, 0));
+        topPanel.setOpaque(false);
+        topPanel.add(btnBack, BorderLayout.WEST);
+        topPanel.add(title, BorderLayout.CENTER);
+
+        JTextArea taQuestion = new JTextArea(4, 40);
+        taQuestion.setFont(fieldFont);
+        taQuestion.setLineWrap(true);
+        taQuestion.setWrapStyleWord(true);
+        taQuestion.setToolTipText("Type your question here…");
+        JScrollPane inputScroll = new JScrollPane(taQuestion);
+
+        JButton btnSubmit = new JButton("Submit Question");
+        btnSubmit.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnSubmit.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String q = taQuestion.getText().trim();
+                if (q.isEmpty()) {
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Please type a question first.", "Empty Question",
+                            JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                try (PreparedStatement ps = con.prepareStatement(
+                        "INSERT INTO CustomerQuestion (AccountID, Question) VALUES (?, ?)")) {
+                    ps.setString(1, user);
+                    ps.setString(2, q);
+                    ps.executeUpdate();
+                    taQuestion.setText("");
+                    loadMyQuestions();
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Your question has been submitted.\nA representative will reply shortly.",
+                            "Submitted", JOptionPane.INFORMATION_MESSAGE);
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Could not submit question: " + ex.getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        JPanel askPanel = new JPanel(new BorderLayout(8, 8));
+        askPanel.setOpaque(false);
+        askPanel.setBorder(BorderFactory.createTitledBorder("New Question"));
+        askPanel.add(inputScroll, BorderLayout.CENTER);
+        askPanel.add(btnSubmit, BorderLayout.EAST);
+
+        questionsCardsPanel = new JPanel();
+        questionsCardsPanel.setLayout(new BoxLayout(questionsCardsPanel, BoxLayout.Y_AXIS));
+        questionsCardsPanel.setBackground(new Color(242, 240, 230));
+        questionsCardsPanel.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0));
+
+        JScrollPane historyScroll = new JScrollPane(questionsCardsPanel);
+        historyScroll.setBorder(BorderFactory.createTitledBorder("My Question History"));
+        historyScroll.getVerticalScrollBar().setUnitIncrement(16);
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, askPanel, historyScroll);
+        split.setResizeWeight(0.28);
+        split.setDividerSize(6);
+
+        page.add(topPanel, BorderLayout.NORTH);
+        page.add(split, BorderLayout.CENTER);
+        return page;
+    }
+
+    private void loadMyQuestions() {
+        if (questionsCardsPanel == null) return;
+        questionsCardsPanel.removeAll();
+
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT QuestionID, Question, Answer, AskedAt, AnsweredAt, AnsweredBy, Status "
+                + "FROM CustomerQuestion WHERE AccountID = ? ORDER BY AskedAt DESC")) {
+            ps.setString(1, user);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean any = false;
+                while (rs.next()) {
+                    any = true;
+                    JPanel card = createQuestionCard(
+                            rs.getLong("QuestionID"),
+                            rs.getString("Question"),
+                            rs.getString("Answer"),
+                            rs.getTimestamp("AskedAt"),
+                            rs.getTimestamp("AnsweredAt"),
+                            rs.getString("AnsweredBy"),
+                            rs.getString("Status"));
+                    card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    questionsCardsPanel.add(card);
+                    questionsCardsPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+                }
+                if (!any) {
+                    JLabel none = new JLabel("You haven't asked any questions yet.");
+                    none.setFont(new Font("Lucida Sans", Font.ITALIC, 14));
+                    none.setBorder(BorderFactory.createEmptyBorder(20, 10, 0, 0));
+                    questionsCardsPanel.add(none);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JLabel err = new JLabel("Error: " + e.getMessage());
+            err.setForeground(Color.RED);
+            questionsCardsPanel.add(err);
+        }
+        questionsCardsPanel.revalidate();
+        questionsCardsPanel.repaint();
+    }
+
+    private JPanel createQuestionCard(long questionId, String question, String answer,
+            java.sql.Timestamp askedAt, java.sql.Timestamp answeredAt,
+            String answeredBy, String status) {
+        boolean answered = "answered".equalsIgnoreCase(status);
+        Color accent = answered ? new Color(0, 160, 0) : new Color(200, 130, 0);
+
+        JPanel card = new JPanel(new BorderLayout(12, 6));
+        card.setBackground(Color.WHITE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(accent, 4),
+                BorderFactory.createEmptyBorder(10, 14, 10, 14)));
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, answered ? 170 : 90));
+
+        JPanel badge = new JPanel(new BorderLayout());
+        badge.setPreferredSize(new Dimension(90, 0));
+        badge.setBackground(accent);
+        JLabel badgeLbl = new JLabel(answered ? "ANSWERED" : "OPEN", SwingConstants.CENTER);
+        badgeLbl.setForeground(Color.WHITE);
+        badgeLbl.setFont(new Font("Lucida Sans", Font.BOLD, 11));
+        badge.add(badgeLbl, BorderLayout.CENTER);
+
+        JPanel info = new JPanel();
+        info.setOpaque(false);
+        info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+
+        JLabel qLabel = new JLabel("<html><b>Q:</b> " + escapeHtml(question) + "</html>");
+        qLabel.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+
+        String askedStr = (askedAt != null) ? askedAt.toString().substring(0, 16) : "";
+        JLabel metaLabel = new JLabel("Asked: " + askedStr);
+        metaLabel.setFont(new Font("Lucida Sans", Font.ITALIC, 11));
+        metaLabel.setForeground(new Color(120, 120, 120));
+
+        info.add(qLabel);
+        info.add(Box.createRigidArea(new Dimension(0, 4)));
+        info.add(metaLabel);
+
+        if (answered && answer != null && !answer.isEmpty()) {
+            JLabel aLabel = new JLabel("<html><b>A:</b> " + escapeHtml(answer) + "</html>");
+            aLabel.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+            aLabel.setForeground(new Color(0, 100, 0));
+            String byStr = (answeredBy != null && !answeredBy.isEmpty()) ? " by " + answeredBy : "";
+            String answeredStr = (answeredAt != null) ? answeredAt.toString().substring(0, 16) : "";
+            JLabel answerMeta = new JLabel("Answered: " + answeredStr + byStr);
+            answerMeta.setFont(new Font("Lucida Sans", Font.ITALIC, 11));
+            answerMeta.setForeground(new Color(0, 120, 0));
+            info.add(Box.createRigidArea(new Dimension(0, 8)));
+            info.add(aLabel);
+            info.add(Box.createRigidArea(new Dimension(0, 2)));
+            info.add(answerMeta);
+        }
+
+        card.add(badge, BorderLayout.WEST);
+        card.add(info, BorderLayout.CENTER);
+        return card;
+    }
+
+    private void loadRepQuestions() {
+        if (repQuestionsTableModel == null) return;
+        repQuestionsTableModel.setRowCount(0);
+        repQuestionIds.clear();
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT QuestionID, AccountID, Question, Answer, AskedAt, Status "
+                + "FROM CustomerQuestion ORDER BY "
+                + "CASE Status WHEN 'open' THEN 0 ELSE 1 END, AskedAt ASC LIMIT 300")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    repQuestionIds.add(rs.getLong("QuestionID"));
+                    String preview = rs.getString("Question");
+                    if (preview != null && preview.length() > 60)
+                        preview = preview.substring(0, 57) + "…";
+                    String answer = rs.getString("Answer");
+                    if (answer == null || answer.isEmpty()) answer = "—";
+                    else if (answer.length() > 60) answer = answer.substring(0, 57) + "…";
+                    repQuestionsTableModel.addRow(new Object[]{
+                        rs.getString("AccountID"),
+                        preview,
+                        answer,
+                        rs.getTimestamp("AskedAt"),
+                        rs.getString("Status")
+                    });
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void replyToQuestion(long questionId) {
+        String questionText = "";
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT Question FROM CustomerQuestion WHERE QuestionID = ?")) {
+            ps.setLong(1, questionId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) questionText = rs.getString("Question");
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return;
+        }
+
+        Font dlgFont = new Font("Lucida Sans", Font.PLAIN, 14);
+        JDialog dialog = new JDialog(this, "Reply to Question", true);
+        dialog.setSize(620, 400);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10, 10));
+        dialog.getRootPane().setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+
+        JLabel qLabel = new JLabel("<html><b>Customer's question:</b><br/><br/>"
+                + escapeHtml(questionText) + "</html>");
+        qLabel.setFont(dlgFont);
+        qLabel.setBorder(BorderFactory.createTitledBorder("Question"));
+
+        JTextArea taAnswer = new JTextArea(6, 40);
+        taAnswer.setFont(dlgFont);
+        taAnswer.setLineWrap(true);
+        taAnswer.setWrapStyleWord(true);
+        JScrollPane answerScroll = new JScrollPane(taAnswer);
+        answerScroll.setBorder(BorderFactory.createTitledBorder("Your Answer"));
+
+        JButton btnSubmit = new JButton("Submit Answer");
+        btnSubmit.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnSubmit.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) {
+                String answer = taAnswer.getText().trim();
+                if (answer.isEmpty()) {
+                    JOptionPane.showMessageDialog(dialog, "Please type an answer first.");
+                    return;
+                }
+                try (PreparedStatement ps = con.prepareStatement(
+                        "UPDATE CustomerQuestion "
+                        + "SET Answer = ?, AnsweredAt = NOW(), AnsweredBy = ?, Status = 'answered' "
+                        + "WHERE QuestionID = ?")) {
+                    ps.setString(1, answer);
+                    ps.setString(2, user);
+                    ps.setLong(3, questionId);
+                    ps.executeUpdate();
+                    dialog.dispose();
+                    loadRepQuestions();
+                    JOptionPane.showMessageDialog(ProjectFrame.this,
+                            "Answer submitted.", "Done", JOptionPane.INFORMATION_MESSAGE);
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                    JOptionPane.showMessageDialog(dialog, "Error: " + ex.getMessage());
+                }
+            }
+        });
+
+        JButton btnCancel = new JButton("Cancel");
+        btnCancel.setFont(dlgFont);
+        btnCancel.addActionListener(new ActionListener() {
+            @Override public void actionPerformed(ActionEvent e) { dialog.dispose(); }
+        });
+
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        btnRow.setOpaque(false);
+        btnRow.add(btnCancel);
+        btnRow.add(btnSubmit);
+
+        dialog.add(qLabel, BorderLayout.NORTH);
+        dialog.add(answerScroll, BorderLayout.CENTER);
+        dialog.add(btnRow, BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    private String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
     private void showBookingForm(int rowIndex) {
         bookingFlightId = flightRowIds.get(rowIndex);
-        int flightNum = (Integer) flightTableModel.getValueAt(rowIndex, 0);
-        String airline = (String) flightTableModel.getValueAt(rowIndex, 1);
-        bookingFrom = (String) flightTableModel.getValueAt(rowIndex, 2);
-        bookingTo = (String) flightTableModel.getValueAt(rowIndex, 3);
-        String dep = flightTableModel.getValueAt(rowIndex, 4).toString();
-        bookingDepDate = dep.length() >= 10 ? dep.substring(0, 10) : dep;
+        int    flightNum = (Integer) flightTableModel.getValueAt(rowIndex, 0);
+        String airline   = (String)  flightTableModel.getValueAt(rowIndex, 1);
+        bookingFrom      = (String)  flightTableModel.getValueAt(rowIndex, 2);
+        bookingTo        = (String)  flightTableModel.getValueAt(rowIndex, 3);
+        String dep       = flightTableModel.getValueAt(rowIndex, 4).toString();
+        bookingDepDate   = dep.length() >= 10 ? dep.substring(0, 10) : dep;
 
         bookingFlightInfo.setText("<html><b>Flight " + flightNum + "</b> &nbsp;&middot;&nbsp; "
                 + airline + "<br/>" + bookingFrom + " &rarr; " + bookingTo
                 + " &nbsp;&middot;&nbsp; Departure: " + dep + "</html>");
+
+        if (isFlightFull(bookingFlightId)) {
+            int pos = getWaitlistPosition(bookingFlightId);
+            if (pos > 0) {
+                JOptionPane.showMessageDialog(this,
+                        "Flight " + flightNum + " (" + bookingFrom + " → " + bookingTo + ") is full.\n"
+                        + "You are already on the waitlist — position " + pos + ".\n"
+                        + "You'll be automatically booked when a seat opens.",
+                        "Already Waitlisted", JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                int choice = JOptionPane.showConfirmDialog(this,
+                        "Flight " + flightNum + " (" + bookingFrom + " → " + bookingTo + ") is full.\n"
+                        + "Would you like to join the waitlist?\n"
+                        + "You'll be automatically booked when a seat opens.",
+                        "Flight Full — Join Waitlist?", JOptionPane.YES_NO_OPTION,
+                        JOptionPane.QUESTION_MESSAGE);
+                if (choice == JOptionPane.YES_OPTION) {
+                    joinWaitlist(bookingFlightId);
+                }
+            }
+            return;
+        }
 
         cbBookingTicketType.setSelectedIndex(0);
         cbBookingClass.setSelectedIndex(0);
@@ -548,41 +1336,661 @@ public class ProjectFrame extends JFrame {
     }
 
     private void loadMyBookings() {
-        if (bookingsTableModel == null)
-            return;
-        bookingsTableModel.setRowCount(0);
+        if (bookingsCardsPanel == null) return;
+        bookingsCardsPanel.removeAll();
+
+        try (PreparedStatement ps = con.prepareStatement(
+                "UPDATE Ticket t "
+                + "JOIN TicketSegment ts ON t.TicketID = ts.TicketID "
+                + "SET t.Status = 'completed' "
+                + "WHERE t.AccountID = ? "
+                + "AND t.Status IN ('booked', 'changed') "
+                + "AND ts.DepartureDate < CURDATE()")) {
+            ps.setString(1, user);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
 
         String sql = "SELECT t.TicketID, t.TicketType, t.FlightClass, t.Status, "
-                + "ts.SeatNumber, ts.DepartureDate, "
-                + "f.FlightNumber, f.Airline_Name, f.DepartureAirport, f.ArrivalAirport "
-                + "FROM Ticket t "
-                + "JOIN TicketSegment ts ON t.TicketID = ts.TicketID "
-                + "JOIN Flight f ON ts.FlightID = f.FlightID "
-                + "WHERE t.AccountID = ? "
-                + "ORDER BY ts.DepartureDate DESC";
+                   + "ts.SeatNumber, ts.DepartureDate, ts.SpecialMeal, ts.SegmentOrder, "
+                   + "f.FlightNumber, f.Airline_Name, f.DepartureAirport, f.ArrivalAirport "
+                   + "FROM Ticket t "
+                   + "JOIN TicketSegment ts ON t.TicketID = ts.TicketID "
+                   + "JOIN Flight f ON ts.FlightID = f.FlightID "
+                   + "WHERE t.AccountID = ? "
+                   + "ORDER BY ts.DepartureDate DESC";
 
         try (PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setString(1, user);
             try (ResultSet rs = ps.executeQuery()) {
+                boolean hasResults = false;
                 while (rs.next()) {
-                    bookingsTableModel.addRow(new Object[] {
+                    hasResults = true;
+                    String depDate = rs.getDate("DepartureDate") != null
+                            ? rs.getDate("DepartureDate").toString() : "";
+                    JPanel card = createBookingCard(
                             rs.getString("TicketID"),
                             rs.getString("TicketType"),
                             rs.getString("FlightClass"),
                             rs.getString("Status"),
                             rs.getString("SeatNumber"),
-                            rs.getDate("DepartureDate"),
+                            depDate,
+                            rs.getString("SpecialMeal"),
                             rs.getInt("FlightNumber"),
                             rs.getString("Airline_Name"),
                             rs.getString("DepartureAirport"),
-                            rs.getString("ArrivalAirport")
-                    });
+                            rs.getString("ArrivalAirport"),
+                            rs.getInt("SegmentOrder"));
+                    card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    bookingsCardsPanel.add(card);
+                    bookingsCardsPanel.add(Box.createRigidArea(new Dimension(0, 10)));
+                }
+                if (!hasResults) {
+                    JLabel noBookings = new JLabel("No bookings found for account: " + user);
+                    noBookings.setFont(new Font("Lucida Sans", Font.ITALIC, 15));
+                    noBookings.setBorder(BorderFactory.createEmptyBorder(20, 10, 0, 0));
+                    bookingsCardsPanel.add(noBookings);
                 }
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            dashboardStatus.setText("Error loading bookings: " + e.getMessage());
+            JLabel errLabel = new JLabel("Error loading bookings: " + e.getMessage());
+            errLabel.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+            errLabel.setForeground(Color.RED);
+            bookingsCardsPanel.add(errLabel);
         }
+
+        bookingsCardsPanel.revalidate();
+        bookingsCardsPanel.repaint();
+        loadWaitlistEntries();
+    }
+
+    private JPanel createBookingCard(String ticketId, String ticketType, String flightClass,
+            String status, String seat, String depDate, String meal,
+            int flightNum, String airline, String from, String to, int segmentOrder) {
+
+        JPanel card = new JPanel(new BorderLayout(12, 6));
+        card.setBackground(Color.WHITE);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(getStatusColor(status), 4),
+                BorderFactory.createEmptyBorder(12, 14, 12, 14)));
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
+
+        JPanel statusBadge = new JPanel(new BorderLayout());
+        statusBadge.setPreferredSize(new Dimension(90, 0));
+        statusBadge.setBackground(getStatusColor(status));
+        JLabel statusLabel = new JLabel(status != null ? status.toUpperCase() : "UNKNOWN",
+                SwingConstants.CENTER);
+        statusLabel.setForeground(Color.WHITE);
+        statusLabel.setFont(new Font("Lucida Sans", Font.BOLD, 11));
+        statusBadge.add(statusLabel, BorderLayout.CENTER);
+
+        JPanel centerInfo = new JPanel();
+        centerInfo.setOpaque(false);
+        centerInfo.setLayout(new BoxLayout(centerInfo, BoxLayout.Y_AXIS));
+
+        JLabel route = new JLabel(from + "  →  " + to);
+        route.setFont(new Font("Lucida Sans", Font.BOLD, 18));
+
+        JLabel airlineInfo = new JLabel(airline + "  ·  Flight " + flightNum
+                + "  ·  " + capitalize(flightClass));
+        airlineInfo.setFont(new Font("Lucida Sans", Font.PLAIN, 14));
+        airlineInfo.setForeground(new Color(60, 60, 60));
+
+        String seatDisplay = (seat != null && !seat.isEmpty()) ? seat : "No Preference";
+        String mealDisplay = (meal != null && !meal.isEmpty()) ? meal : "None";
+        JLabel details = new JLabel(depDate + "  ·  Seat: " + seatDisplay
+                + "  ·  Meal: " + mealDisplay);
+        details.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+        details.setForeground(new Color(80, 80, 80));
+
+        JLabel tidLabel = new JLabel("Ticket: " + ticketId
+                + "   Type: " + (ticketType != null ? ticketType.replace("_", " ") : ""));
+        tidLabel.setFont(new Font("Lucida Sans", Font.ITALIC, 11));
+        tidLabel.setForeground(new Color(140, 140, 140));
+
+        centerInfo.add(route);
+        centerInfo.add(Box.createRigidArea(new Dimension(0, 4)));
+        centerInfo.add(airlineInfo);
+        centerInfo.add(Box.createRigidArea(new Dimension(0, 3)));
+        centerInfo.add(details);
+        centerInfo.add(Box.createRigidArea(new Dimension(0, 3)));
+        centerInfo.add(tidLabel);
+
+        boolean isActive = "booked".equalsIgnoreCase(status) || "changed".equalsIgnoreCase(status);
+
+        JButton btnCancel = new JButton("Cancel");
+        btnCancel.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
+        btnCancel.setEnabled(isActive);
+        btnCancel.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                int choice = JOptionPane.showConfirmDialog(ProjectFrame.this,
+                        "Cancel booking " + ticketId + "?\nThis cannot be undone.",
+                        "Confirm Cancellation", JOptionPane.YES_NO_OPTION);
+                if (choice == JOptionPane.YES_OPTION) {
+                    cancelBooking(ticketId);
+                }
+            }
+        });
+
+        JButton btnChange = new JButton("Change Flight");
+        btnChange.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
+        btnChange.setEnabled(isActive);
+        btnChange.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                showChangeFlightDialog(ticketId, segmentOrder);
+            }
+        });
+
+        JPanel actionPanel = new JPanel();
+        actionPanel.setOpaque(false);
+        actionPanel.setLayout(new BoxLayout(actionPanel, BoxLayout.Y_AXIS));
+        actionPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+        btnCancel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        btnChange.setAlignmentX(Component.CENTER_ALIGNMENT);
+        actionPanel.add(Box.createVerticalGlue());
+        actionPanel.add(btnChange);
+        actionPanel.add(Box.createRigidArea(new Dimension(0, 6)));
+        actionPanel.add(btnCancel);
+        actionPanel.add(Box.createVerticalGlue());
+
+        card.add(statusBadge, BorderLayout.WEST);
+        card.add(centerInfo, BorderLayout.CENTER);
+        card.add(actionPanel, BorderLayout.EAST);
+        return card;
+    }
+
+    private Color getStatusColor(String status) {
+        if (status == null) return Color.GRAY;
+        switch (status.toLowerCase()) {
+            case "booked":    return new Color(0, 120, 200);
+            case "completed": return new Color(0, 160, 0);
+            case "cancelled": return new Color(200, 0, 0);
+            case "changed":   return new Color(200, 120, 0);
+            default:          return Color.GRAY;
+        }
+    }
+
+    private void cancelBooking(String ticketId) {
+        try {
+            long flightId = -1;
+            String freedSeat = null;
+            String depDate = null;
+            try (PreparedStatement ps = con.prepareStatement(
+                    "SELECT ts.FlightID, ts.SeatNumber, ts.DepartureDate "
+                    + "FROM TicketSegment ts WHERE ts.TicketID = ? ORDER BY ts.SegmentOrder ASC LIMIT 1")) {
+                ps.setString(1, ticketId);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    flightId  = rs.getLong("FlightID");
+                    freedSeat = rs.getString("SeatNumber");
+                    depDate   = rs.getDate("DepartureDate") != null
+                            ? rs.getDate("DepartureDate").toString() : null;
+                }
+            }
+
+            try (PreparedStatement ps = con.prepareStatement(
+                    "UPDATE Ticket SET Status = 'cancelled' WHERE TicketID = ?")) {
+                ps.setString(1, ticketId);
+                ps.executeUpdate();
+            }
+
+            if (flightId > 0 && depDate != null) {
+                promoteFromWaitlist(flightId, freedSeat, depDate);
+            }
+
+            loadMyBookings();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this,
+                    "Could not cancel booking: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void refreshAccountDropdown() {
+        if (cbAccountLookup == null) return;
+        suppressLookup = true;
+        Object prev = cbAccountLookup.getSelectedItem();
+        cbAccountLookup.removeAllItems();
+        String sql = "SELECT a.AccountID, "
+                   + "COALESCE(c.FirstName, '') AS FirstName, "
+                   + "COALESCE(c.LastName, '')  AS LastName "
+                   + "FROM Account a JOIN Customer c ON a.CustomerID = c.CustomerID "
+                   + "ORDER BY a.AccountID";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                String display = rs.getString("AccountID")
+                        + " — " + rs.getString("FirstName")
+                        + " " + rs.getString("LastName");
+                cbAccountLookup.addItem(display.trim());
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        suppressLookup = false;
+        if (prev != null) cbAccountLookup.setSelectedItem(prev);
+    }
+
+    private void loadCustomerLookup(String accountId) {
+        if (accountId.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enter an Account ID first.",
+                    "Missing Input", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        lookupCardsPanel.removeAll();
+
+        String sql = "SELECT t.TicketID, t.TicketType, t.FlightClass, t.Status, "
+                   + "ts.SeatNumber, ts.DepartureDate, ts.SpecialMeal, ts.SegmentOrder, "
+                   + "f.FlightNumber, f.Airline_Name, f.DepartureAirport, f.ArrivalAirport "
+                   + "FROM Ticket t "
+                   + "JOIN TicketSegment ts ON t.TicketID = ts.TicketID "
+                   + "JOIN Flight f ON ts.FlightID = f.FlightID "
+                   + "WHERE t.AccountID = ? ORDER BY ts.DepartureDate DESC";
+
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, accountId);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean any = false;
+                while (rs.next()) {
+                    any = true;
+                    String depDate = rs.getDate("DepartureDate") != null
+                            ? rs.getDate("DepartureDate").toString() : "";
+                    JPanel card = createBookingCard(
+                            rs.getString("TicketID"), rs.getString("TicketType"),
+                            rs.getString("FlightClass"), rs.getString("Status"),
+                            rs.getString("SeatNumber"), depDate,
+                            rs.getString("SpecialMeal"), rs.getInt("FlightNumber"),
+                            rs.getString("Airline_Name"), rs.getString("DepartureAirport"),
+                            rs.getString("ArrivalAirport"), rs.getInt("SegmentOrder"));
+                    card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    lookupCardsPanel.add(card);
+                    lookupCardsPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+                }
+                if (!any) {
+                    JLabel none = new JLabel("No bookings found for account: " + accountId);
+                    none.setFont(new Font("Lucida Sans", Font.ITALIC, 14));
+                    none.setBorder(BorderFactory.createEmptyBorder(10, 6, 0, 0));
+                    lookupCardsPanel.add(none);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JLabel err = new JLabel("Error: " + e.getMessage());
+            err.setForeground(Color.RED);
+            lookupCardsPanel.add(err);
+        }
+        lookupCardsPanel.revalidate();
+        lookupCardsPanel.repaint();
+    }
+
+    private void loadAllUsers() {
+        if (usersTableModel == null) return;
+        usersTableModel.setRowCount(0);
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT `user`, role, created_at FROM users ORDER BY created_at DESC")) {
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                usersTableModel.addRow(new Object[]{
+                    rs.getString("user"),
+                    rs.getString("role"),
+                    rs.getTimestamp("created_at")
+                });
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void loadAllBookings() {
+        if (allBookingsTableModel == null) return;
+        allBookingsTableModel.setRowCount(0);
+        String sql = "SELECT t.AccountID, "
+                   + "CONCAT(c.FirstName, ' ', c.LastName) AS CustomerName, "
+                   + "CONCAT(f.DepartureAirport, '→', f.ArrivalAirport) AS Route, "
+                   + "f.FlightNumber, t.FlightClass, t.Status, ts.DepartureDate "
+                   + "FROM Ticket t "
+                   + "JOIN TicketSegment ts ON t.TicketID = ts.TicketID "
+                   + "JOIN Flight f ON ts.FlightID = f.FlightID "
+                   + "JOIN Customer c ON t.CustomerID = c.CustomerID "
+                   + "ORDER BY ts.DepartureDate DESC LIMIT 500";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                allBookingsTableModel.addRow(new Object[]{
+                    rs.getString("AccountID"),
+                    rs.getString("CustomerName"),
+                    rs.getString("Route"),
+                    rs.getInt("FlightNumber"),
+                    rs.getString("FlightClass"),
+                    rs.getString("Status"),
+                    rs.getDate("DepartureDate")
+                });
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void searchReservations(String flightNum, String customerName) {
+        if (allBookingsTableModel == null) return;
+        allBookingsTableModel.setRowCount(0);
+
+        if (flightNum.isEmpty() && customerName.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "Please enter either a flight number or customer name to search.",
+                    "Search Parameters Required", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        StringBuilder sql = new StringBuilder(
+                "SELECT t.AccountID, " +
+                "CONCAT(c.FirstName, ' ', c.LastName) AS CustomerName, " +
+                "CONCAT(f.DepartureAirport, '→', f.ArrivalAirport) AS Route, " +
+                "f.FlightNumber, t.FlightClass, t.Status, ts.DepartureDate " +
+                "FROM Ticket t " +
+                "JOIN TicketSegment ts ON t.TicketID = ts.TicketID " +
+                "JOIN Flight f ON ts.FlightID = f.FlightID " +
+                "JOIN Customer c ON t.CustomerID = c.CustomerID " +
+                "WHERE 1=1 ");
+
+        List<Object> params = new ArrayList<>();
+
+        if (!flightNum.isEmpty()) {
+            sql.append("AND f.FlightNumber = ? ");
+            try {
+                params.add(Integer.parseInt(flightNum));
+            } catch (NumberFormatException e) {
+                JOptionPane.showMessageDialog(this,
+                        "Flight number must be a valid integer.",
+                        "Invalid Flight Number", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+        }
+
+        if (!customerName.isEmpty()) {
+            sql.append("AND (c.FirstName LIKE ? OR c.LastName LIKE ?) ");
+            String pattern = "%" + customerName + "%";
+            params.add(pattern);
+            params.add(pattern);
+        }
+
+        sql.append("ORDER BY ts.DepartureDate DESC LIMIT 500");
+
+        try (PreparedStatement ps = con.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setObject(i + 1, params.get(i));
+            }
+            ResultSet rs = ps.executeQuery();
+            int count = 0;
+            while (rs.next()) {
+                allBookingsTableModel.addRow(new Object[]{
+                    rs.getString("AccountID"),
+                    rs.getString("CustomerName"),
+                    rs.getString("Route"),
+                    rs.getInt("FlightNumber"),
+                    rs.getString("FlightClass"),
+                    rs.getString("Status"),
+                    rs.getDate("DepartureDate")
+                });
+                count++;
+            }
+            if (count == 0) {
+                JOptionPane.showMessageDialog(this,
+                        "No reservations found matching the search criteria.",
+                        "No Results", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this,
+                    "Search failed: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void showChangeFlightDialog(String ticketId, int segmentOrder) {
+        JDialog dialog = new JDialog(this, "Change Flight — " + ticketId, true);
+        dialog.setSize(900, 560);
+        dialog.setLocationRelativeTo(this);
+        dialog.setLayout(new BorderLayout(10, 10));
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 13);
+        String[] airports = airportList();
+
+        JComboBox<String> cbFrom = new JComboBox<>(airports);
+        JComboBox<String> cbTo   = new JComboBox<>(airports);
+        JTextField tfDialogDate  = new JTextField(10);
+        tfDialogDate.setFont(fieldFont);
+        tfDialogDate.setToolTipText("yyyy-MM-dd or leave blank");
+        cbFrom.setFont(fieldFont);
+        cbTo.setFont(fieldFont);
+
+        DefaultTableModel dialogModel = new DefaultTableModel(
+                new String[]{"Flight #", "Airline", "From", "To", "Departure", "Arrival", "Type"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        List<Long> dialogFlightIds = new ArrayList<>();
+        JTable dialogTable = new JTable(dialogModel);
+        dialogTable.setRowHeight(22);
+        dialogTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+
+        JComboBox<String> cbDialogSeat = new JComboBox<>();
+        cbDialogSeat.addItem("No Preference");
+        cbDialogSeat.setFont(fieldFont);
+
+        dialogTable.getSelectionModel().addListSelectionListener(e -> {
+            if (e.getValueIsAdjusting()) return;
+            int row = dialogTable.getSelectedRow();
+            if (row >= 0 && row < dialogFlightIds.size()) {
+                long fid = dialogFlightIds.get(row);
+                cbDialogSeat.removeAllItems();
+                cbDialogSeat.addItem("No Preference");
+                String sql = "SELECT ac.SeatCapacity FROM Aircraft ac "
+                           + "JOIN Flight f ON ac.AircraftID = f.AircraftID WHERE f.FlightID = ?";
+                try (PreparedStatement ps = con.prepareStatement(sql)) {
+                    ps.setLong(1, fid);
+                    ResultSet rs = ps.executeQuery();
+                    if (rs.next()) {
+                        int capacity = rs.getInt("SeatCapacity");
+                        int rows = (int) Math.ceil(capacity / 6.0);
+                        String[] letters = {"A","B","C","D","E","F"};
+                        int count = 0;
+                        outer:
+                        for (int r2 = 1; r2 <= rows; r2++) {
+                            for (String l : letters) {
+                                cbDialogSeat.addItem(r2 + l);
+                                if (++count >= capacity) break outer;
+                            }
+                        }
+                    }
+                } catch (SQLException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        });
+
+        JButton btnDialogSearch = new JButton("Search Flights");
+        btnDialogSearch.setFont(fieldFont);
+        btnDialogSearch.addActionListener(e -> {
+            dialogModel.setRowCount(0);
+            dialogFlightIds.clear();
+            String fromSel = cbFrom.getSelectedItem().toString();
+            String toSel   = cbTo.getSelectedItem().toString();
+            String fromCode = fromSel.equals("Any") ? "" : fromSel.substring(0, 3);
+            String toCode   = toSel.equals("Any")   ? "" : toSel.substring(0, 3);
+            String dateVal  = tfDialogDate.getText().trim();
+
+            String sql = "SELECT FlightID, FlightNumber, Airline_Name, DepartureAirport, "
+                       + "ArrivalAirport, DepartureTime, ArrivalTime, Travel_Type "
+                       + "FROM Flight WHERE 1=1";
+            if (!fromCode.isEmpty()) sql += " AND DepartureAirport = ?";
+            if (!toCode.isEmpty())   sql += " AND ArrivalAirport = ?";
+            if (!dateVal.isEmpty())  sql += " AND DATE(DepartureTime) = ?";
+            sql += " ORDER BY DepartureTime LIMIT 100";
+
+            try (PreparedStatement ps = con.prepareStatement(sql)) {
+                int idx = 1;
+                if (!fromCode.isEmpty()) ps.setString(idx++, fromCode);
+                if (!toCode.isEmpty())   ps.setString(idx++, toCode);
+                if (!dateVal.isEmpty())  ps.setString(idx++, dateVal);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        dialogFlightIds.add(rs.getLong("FlightID"));
+                        dialogModel.addRow(new Object[]{
+                            rs.getInt("FlightNumber"),
+                            rs.getString("Airline_Name"),
+                            rs.getString("DepartureAirport"),
+                            rs.getString("ArrivalAirport"),
+                            rs.getTimestamp("DepartureTime"),
+                            rs.getTimestamp("ArrivalTime"),
+                            rs.getString("Travel_Type")
+                        });
+                    }
+                }
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(dialog, "Error loading flights: " + ex.getMessage());
+            }
+        });
+
+        JButton btnConfirmChange = new JButton("Confirm Change");
+        btnConfirmChange.setFont(new Font("Lucida Sans", Font.BOLD, 14));
+        btnConfirmChange.addActionListener(e -> {
+            int row = dialogTable.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(dialog, "Select a new flight from the table first.");
+                return;
+            }
+            long newFlightId = dialogFlightIds.get(row);
+            String newFrom   = dialogModel.getValueAt(row, 2).toString();
+            String newTo     = dialogModel.getValueAt(row, 3).toString();
+            String newDep    = dialogModel.getValueAt(row, 4).toString();
+            String newDate   = newDep.length() >= 10 ? newDep.substring(0, 10) : newDep;
+            String seatSel   = cbDialogSeat.getSelectedItem().toString();
+            String seatNum   = seatSel.equals("No Preference") ? null : seatSel;
+
+            try {
+                try (PreparedStatement ps = con.prepareStatement(
+                        "UPDATE TicketSegment SET FlightID=?, DepartureDate=?, SeatNumber=? "
+                        + "WHERE TicketID=? AND SegmentOrder=?")) {
+                    ps.setLong(1, newFlightId);
+                    ps.setString(2, newDate);
+                    ps.setString(3, seatNum);
+                    ps.setString(4, ticketId);
+                    ps.setInt(5, segmentOrder);
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = con.prepareStatement(
+                        "UPDATE Ticket SET Status='changed', FromAirport=?, ToAirport=? "
+                        + "WHERE TicketID=?")) {
+                    ps.setString(1, newFrom);
+                    ps.setString(2, newTo);
+                    ps.setString(3, ticketId);
+                    ps.executeUpdate();
+                }
+                dialog.dispose();
+                loadMyBookings();
+            } catch (SQLException ex) {
+                ex.printStackTrace();
+                if (ex.getErrorCode() == 1062) {
+                    JOptionPane.showMessageDialog(dialog,
+                            "Seat " + seatSel + " is already taken on that flight. Pick another.");
+                } else {
+                    JOptionPane.showMessageDialog(dialog,
+                            "Change failed: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        JPanel searchBar = new JPanel(new GridLayout(2, 4, 8, 6));
+        searchBar.setBorder(BorderFactory.createTitledBorder("Filter Flights"));
+        JLabel lbF = new JLabel("From"); lbF.setFont(fieldFont);
+        JLabel lbT = new JLabel("To");   lbT.setFont(fieldFont);
+        JLabel lbD = new JLabel("Date (yyyy-MM-dd)");
+        lbD.setFont(new Font("Lucida Sans", Font.PLAIN, 11));
+        searchBar.add(lbF); searchBar.add(lbT); searchBar.add(lbD); searchBar.add(new JLabel());
+        searchBar.add(cbFrom); searchBar.add(cbTo); searchBar.add(tfDialogDate);
+        searchBar.add(btnDialogSearch);
+
+        JPanel seatRow = new JPanel(new GridLayout(1, 4, 8, 0));
+        seatRow.setOpaque(false);
+        seatRow.setBorder(BorderFactory.createTitledBorder("Seat for New Flight"));
+        JLabel lbSeat = new JLabel("Seat Number"); lbSeat.setFont(fieldFont);
+        seatRow.add(lbSeat);
+        seatRow.add(cbDialogSeat);
+        seatRow.add(new JLabel());
+        seatRow.add(btnConfirmChange);
+
+        JScrollPane tableScroll = new JScrollPane(dialogTable);
+        tableScroll.setBorder(BorderFactory.createTitledBorder(
+                "Available Flights (select one, then pick a seat)"));
+
+        JPanel south = new JPanel(new BorderLayout(8, 8));
+        south.add(seatRow, BorderLayout.CENTER);
+
+        dialog.add(searchBar, BorderLayout.NORTH);
+        dialog.add(tableScroll, BorderLayout.CENTER);
+        dialog.add(south, BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    private String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+    }
+
+    private String[] airportList() {
+        return new String[] {
+            "Any",
+            "ATL - Hartsfield-Jackson Atlanta",
+            "LAX - Los Angeles International",
+            "ORD - O'Hare International (Chicago)",
+            "DFW - Dallas/Fort Worth International",
+            "DEN - Denver International",
+            "JFK - John F. Kennedy International (New York)",
+            "SFO - San Francisco International",
+            "SEA - Seattle-Tacoma International",
+            "LAS - Harry Reid International (Las Vegas)",
+            "MCO - Orlando International",
+            "EWR - Newark Liberty International",
+            "MIA - Miami International",
+            "PHX - Phoenix Sky Harbor International",
+            "IAH - George Bush Intercontinental (Houston)",
+            "BOS - Logan International (Boston)",
+            "MSP - Minneapolis-Saint Paul International",
+            "DTW - Detroit Metropolitan Wayne County",
+            "PHL - Philadelphia International",
+            "LGA - LaGuardia (New York)",
+            "CLT - Charlotte Douglas International",
+            "SLC - Salt Lake City International",
+            "BWI - Baltimore/Washington International",
+            "SAN - San Diego International",
+            "MDW - Chicago Midway International",
+            "TPA - Tampa International",
+            "HNL - Daniel K. Inouye International (Honolulu)",
+            "PDX - Portland International",
+            "STL - St. Louis Lambert International",
+            "BNA - Nashville International",
+            "AUS - Austin-Bergstrom International",
+            "MCI - Kansas City International",
+            "RDU - Raleigh-Durham International",
+            "FLL - Fort Lauderdale-Hollywood International",
+            "OAK - Oakland International",
+            "SMF - Sacramento International",
+            "SJC - Norman Y. Mineta San Jose International",
+            "ABQ - Albuquerque International Sunport",
+            "MSY - Louis Armstrong New Orleans International",
+            "JAX - Jacksonville International",
+            "IND - Indianapolis International",
+            "PIT - Pittsburgh International",
+            "CMH - John Glenn Columbus International",
+            "CLE - Cleveland Hopkins International",
+            "MKE - General Mitchell International (Milwaukee)"
+        };
     }
 
     private JPanel buildBookingPanel() {
@@ -764,6 +2172,82 @@ public class ProjectFrame extends JFrame {
         }
     }
 
+    private boolean createCustomerAccountForUser(String accountId) throws SQLException {
+        JTextField tfFirstName = new JTextField();
+        JTextField tfLastName = new JTextField();
+        JTextField tfEmail = new JTextField();
+        JTextField tfPhone = new JTextField();
+
+        JPanel profilePanel = new JPanel(new GridLayout(0, 2, 8, 8));
+        profilePanel.add(new JLabel("Account ID:"));
+        profilePanel.add(new JLabel(accountId));
+        profilePanel.add(new JLabel("First Name:"));
+        profilePanel.add(tfFirstName);
+        profilePanel.add(new JLabel("Last Name:"));
+        profilePanel.add(tfLastName);
+        profilePanel.add(new JLabel("Email (optional):"));
+        profilePanel.add(tfEmail);
+        profilePanel.add(new JLabel("Phone (optional):"));
+        profilePanel.add(tfPhone);
+
+        int result = JOptionPane.showConfirmDialog(this, profilePanel,
+                "Customer Profile for \"" + accountId + "\"",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (result != JOptionPane.OK_OPTION) {
+            return false;
+        }
+
+        String firstName = tfFirstName.getText().trim();
+        String lastName = tfLastName.getText().trim();
+        String email = tfEmail.getText().trim();
+        String phone = tfPhone.getText().trim();
+
+        if (firstName.isEmpty() || lastName.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "First name and last name are required for customer accounts.",
+                    "Missing Customer Details", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
+
+        Integer customerId = null;
+        try (PreparedStatement psCustomer = con.prepareStatement(
+                "INSERT INTO Customer (FirstName, LastName, Email, Phone) VALUES (?, ?, ?, ?)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            psCustomer.setString(1, firstName);
+            psCustomer.setString(2, lastName);
+            if (email.isEmpty()) {
+                psCustomer.setNull(3, Types.VARCHAR);
+            } else {
+                psCustomer.setString(3, email);
+            }
+            if (phone.isEmpty()) {
+                psCustomer.setNull(4, Types.VARCHAR);
+            } else {
+                psCustomer.setString(4, phone);
+            }
+            psCustomer.executeUpdate();
+
+            try (ResultSet keys = psCustomer.getGeneratedKeys()) {
+                if (keys.next()) {
+                    customerId = keys.getInt(1);
+                }
+            }
+        }
+
+        if (customerId == null) {
+            throw new SQLException("Could not create customer profile.");
+        }
+
+        try (PreparedStatement psAccount = con.prepareStatement(
+                "INSERT INTO Account (AccountID, CustomerID) VALUES (?, ?)")) {
+            psAccount.setString(1, accountId);
+            psAccount.setInt(2, customerId);
+            psAccount.executeUpdate();
+        }
+
+        return true;
+    }
+
     private JPanel buildConfirmationPanel() {
         JPanel panel = new JPanel(new BorderLayout(10, 10));
         panel.setBorder(BorderFactory.createEmptyBorder(40, 40, 40, 40));
@@ -798,7 +2282,7 @@ public class ProjectFrame extends JFrame {
             @Override
             public void actionPerformed(ActionEvent e) {
                 loadMyBookings();
-                cardLayout.show(rootPanel, "dashboard");
+                cardLayout.show(rootPanel, "myBookings");
             }
         });
 
@@ -1181,6 +2665,332 @@ public class ProjectFrame extends JFrame {
         return panel;
     } // megan added 8 methods end 
 
+    private boolean isFlightFull(long flightId) {
+        String sql = "SELECT ac.SeatCapacity, "
+                   + "COUNT(ts.SeatNumber) AS booked "
+                   + "FROM Aircraft ac "
+                   + "JOIN Flight f ON f.AircraftID = ac.AircraftID "
+                   + "LEFT JOIN TicketSegment ts ON ts.FlightID = f.FlightID "
+                   + "  AND ts.SeatNumber IS NOT NULL "
+                   + "LEFT JOIN Ticket t ON ts.TicketID = t.TicketID "
+                   + "  AND t.Status NOT IN ('cancelled') "
+                   + "WHERE f.FlightID = ? "
+                   + "GROUP BY ac.SeatCapacity";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, flightId);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getInt("booked") >= rs.getInt("SeatCapacity");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    private int getWaitlistPosition(long flightId) {
+        if (loggedInCustomerId < 0) return -1;
+        try (PreparedStatement ps = con.prepareStatement(
+                "SELECT RequestedAt FROM FlightWaitlist WHERE FlightID = ? AND CustomerID = ?")) {
+            ps.setLong(1, flightId);
+            ps.setInt(2, loggedInCustomerId);
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) return -1;
+            java.sql.Timestamp myTime = rs.getTimestamp("RequestedAt");
+            try (PreparedStatement ps2 = con.prepareStatement(
+                    "SELECT COUNT(*) FROM FlightWaitlist WHERE FlightID = ? AND RequestedAt < ?")) {
+                ps2.setLong(1, flightId);
+                ps2.setTimestamp(2, myTime);
+                ResultSet rs2 = ps2.executeQuery();
+                rs2.next();
+                return rs2.getInt(1) + 1;
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return -1;
+        }
+    }
+
+    private void joinWaitlist(long flightId) {
+        if (loggedInCustomerId < 0) {
+            JOptionPane.showMessageDialog(this,
+                    "No customer profile found for '" + user + "'. Contact an admin.",
+                    "Profile Not Found", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        try (PreparedStatement ps = con.prepareStatement(
+                "INSERT INTO FlightWaitlist (FlightID, CustomerID) VALUES (?, ?)")) {
+            ps.setLong(1, flightId);
+            ps.setInt(2, loggedInCustomerId);
+            ps.executeUpdate();
+            int pos = getWaitlistPosition(flightId);
+            JOptionPane.showMessageDialog(this,
+                    "You've been added to the waitlist.\nYour position: " + pos
+                    + "\nYou'll be automatically booked when a seat opens.",
+                    "Waitlist Confirmed", JOptionPane.INFORMATION_MESSAGE);
+        } catch (SQLException e) {
+            if (e.getErrorCode() == 1062) {
+                int pos = getWaitlistPosition(flightId);
+                JOptionPane.showMessageDialog(this,
+                        "You're already on the waitlist for this flight.\nYour position: " + pos,
+                        "Already Waitlisted", JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this,
+                        "Could not join waitlist: " + e.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+
+    private void promoteFromWaitlist(long flightId, String freedSeat, String depDate) {
+        try {
+            long waitlistId = -1;
+            int nextCustomerId = -1;
+            String nextAccountId = null, nextFrom = null, nextTo = null;
+
+            try (PreparedStatement ps = con.prepareStatement(
+                    "SELECT wl.WaitlistID, wl.CustomerID, a.AccountID, "
+                    + "f.DepartureAirport, f.ArrivalAirport "
+                    + "FROM FlightWaitlist wl "
+                    + "JOIN Account a ON a.CustomerID = wl.CustomerID "
+                    + "JOIN Flight f ON f.FlightID = wl.FlightID "
+                    + "WHERE wl.FlightID = ? ORDER BY wl.RequestedAt ASC LIMIT 1")) {
+                ps.setLong(1, flightId);
+                ResultSet rs = ps.executeQuery();
+                if (!rs.next()) return;
+                waitlistId     = rs.getLong("WaitlistID");
+                nextCustomerId = rs.getInt("CustomerID");
+                nextAccountId  = rs.getString("AccountID");
+                nextFrom       = rs.getString("DepartureAirport");
+                nextTo         = rs.getString("ArrivalAirport");
+            }
+
+            String newTicketId  = "TKT-WL-" + System.currentTimeMillis();
+            long   newTicketNum = System.currentTimeMillis();
+
+            try (PreparedStatement ps = con.prepareStatement(
+                    "INSERT INTO Ticket (TicketID, TicketNumber, TicketType, FlightClass, "
+                    + "BookingFee, TotalFare, Flexibility, FromAirport, ToAirport, "
+                    + "IsPaid, Status, CustomerID, AccountID) "
+                    + "VALUES (?, ?, 'one_way', 'economy', 0.00, 0.00, FALSE, ?, ?, FALSE, 'booked', ?, ?)")) {
+                ps.setString(1, newTicketId);
+                ps.setLong(2, newTicketNum);
+                ps.setString(3, nextFrom);
+                ps.setString(4, nextTo);
+                ps.setInt(5, nextCustomerId);
+                ps.setString(6, nextAccountId);
+                ps.executeUpdate();
+            }
+
+            try (PreparedStatement ps = con.prepareStatement(
+                    "INSERT INTO TicketSegment "
+                    + "(TicketID, SegmentOrder, FlightID, DepartureDate, SeatNumber, SpecialMeal, SegmentFare) "
+                    + "VALUES (?, 1, ?, ?, ?, NULL, 0.00)")) {
+                ps.setString(1, newTicketId);
+                ps.setLong(2, flightId);
+                ps.setString(3, depDate);
+                ps.setString(4, freedSeat);
+                ps.executeUpdate();
+            }
+
+            try (PreparedStatement ps = con.prepareStatement(
+                    "DELETE FROM FlightWaitlist WHERE WaitlistID = ?")) {
+                ps.setLong(1, waitlistId);
+                ps.executeUpdate();
+            }
+
+            JOptionPane.showMessageDialog(this,
+                    "A seat was freed — the next customer on the waitlist has been automatically booked.\n"
+                    + "New Ticket ID: " + newTicketId,
+                    "Waitlist Promotion", JOptionPane.INFORMATION_MESSAGE);
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void loadWaitlistEntries() {
+        if (waitlistCardsPanel == null) return;
+        waitlistCardsPanel.removeAll();
+
+        if (loggedInCustomerId < 0) {
+            waitlistCardsPanel.revalidate();
+            waitlistCardsPanel.repaint();
+            return;
+        }
+
+        String sql = "SELECT wl.WaitlistID, wl.FlightID, wl.RequestedAt, "
+                   + "f.FlightNumber, f.Airline_Name, f.DepartureAirport, f.ArrivalAirport, "
+                   + "f.DepartureTime, "
+                   + "(SELECT COUNT(*) + 1 FROM FlightWaitlist wl2 "
+                   + " WHERE wl2.FlightID = wl.FlightID AND wl2.RequestedAt < wl.RequestedAt) AS QueuePosition "
+                   + "FROM FlightWaitlist wl "
+                   + "JOIN Flight f ON wl.FlightID = f.FlightID "
+                   + "WHERE wl.CustomerID = ? ORDER BY wl.RequestedAt ASC";
+
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setInt(1, loggedInCustomerId);
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean any = false;
+                while (rs.next()) {
+                    any = true;
+                    long   wlId      = rs.getLong("WaitlistID");
+                    String from      = rs.getString("DepartureAirport");
+                    String to        = rs.getString("ArrivalAirport");
+                    String airline   = rs.getString("Airline_Name");
+                    int    flightNum = rs.getInt("FlightNumber");
+                    String depTime   = rs.getTimestamp("DepartureTime") != null
+                            ? rs.getTimestamp("DepartureTime").toString().substring(0, 16) : "";
+                    String requested = rs.getTimestamp("RequestedAt") != null
+                            ? rs.getTimestamp("RequestedAt").toString().substring(0, 16) : "";
+                    int    position  = rs.getInt("QueuePosition");
+
+                    JPanel card = new JPanel(new BorderLayout(12, 6));
+                    card.setBackground(Color.WHITE);
+                    card.setBorder(BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(new Color(130, 80, 180), 4),
+                            BorderFactory.createEmptyBorder(10, 14, 10, 14)));
+                    card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 100));
+
+                    JPanel badge = new JPanel(new BorderLayout());
+                    badge.setPreferredSize(new Dimension(90, 0));
+                    badge.setBackground(new Color(130, 80, 180));
+                    JLabel badgeLbl = new JLabel("WAITLIST", SwingConstants.CENTER);
+                    badgeLbl.setForeground(Color.WHITE);
+                    badgeLbl.setFont(new Font("Lucida Sans", Font.BOLD, 10));
+                    badge.add(badgeLbl, BorderLayout.CENTER);
+
+                    JPanel info = new JPanel();
+                    info.setOpaque(false);
+                    info.setLayout(new BoxLayout(info, BoxLayout.Y_AXIS));
+
+                    JLabel route = new JLabel(from + "  →  " + to);
+                    route.setFont(new Font("Lucida Sans", Font.BOLD, 17));
+
+                    JLabel detail1 = new JLabel(airline + "  ·  Flight " + flightNum
+                            + "  ·  Departs: " + depTime);
+                    detail1.setFont(new Font("Lucida Sans", Font.PLAIN, 13));
+                    detail1.setForeground(new Color(60, 60, 60));
+
+                    JLabel detail2 = new JLabel("Queue position: " + position
+                            + "  ·  Joined: " + requested);
+                    detail2.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
+                    detail2.setForeground(new Color(100, 100, 100));
+
+                    info.add(route);
+                    info.add(Box.createRigidArea(new Dimension(0, 4)));
+                    info.add(detail1);
+                    info.add(Box.createRigidArea(new Dimension(0, 3)));
+                    info.add(detail2);
+
+                    JButton btnLeave = new JButton("Leave Waitlist");
+                    btnLeave.setFont(new Font("Lucida Sans", Font.PLAIN, 12));
+                    btnLeave.addActionListener(new ActionListener() {
+                        @Override
+                        public void actionPerformed(ActionEvent e) {
+                            int choice = JOptionPane.showConfirmDialog(ProjectFrame.this,
+                                    "Leave the waitlist for Flight " + flightNum
+                                    + " (" + from + " → " + to + ")?",
+                                    "Confirm", JOptionPane.YES_NO_OPTION);
+                            if (choice == JOptionPane.YES_OPTION) {
+                                try (PreparedStatement ps2 = con.prepareStatement(
+                                        "DELETE FROM FlightWaitlist WHERE WaitlistID = ?")) {
+                                    ps2.setLong(1, wlId);
+                                    ps2.executeUpdate();
+                                    loadWaitlistEntries();
+                                } catch (SQLException ex) {
+                                    ex.printStackTrace();
+                                }
+                            }
+                        }
+                    });
+
+                    JPanel actionPanel = new JPanel();
+                    actionPanel.setOpaque(false);
+                    actionPanel.setLayout(new BoxLayout(actionPanel, BoxLayout.Y_AXIS));
+                    actionPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
+                    btnLeave.setAlignmentX(Component.CENTER_ALIGNMENT);
+                    actionPanel.add(Box.createVerticalGlue());
+                    actionPanel.add(btnLeave);
+                    actionPanel.add(Box.createVerticalGlue());
+
+                    card.add(badge, BorderLayout.WEST);
+                    card.add(info, BorderLayout.CENTER);
+                    card.add(actionPanel, BorderLayout.EAST);
+                    card.setAlignmentX(Component.LEFT_ALIGNMENT);
+                    waitlistCardsPanel.add(card);
+                    waitlistCardsPanel.add(Box.createRigidArea(new Dimension(0, 8)));
+                }
+                if (!any) {
+                    JLabel none = new JLabel("Not on any waitlists.");
+                    none.setFont(new Font("Lucida Sans", Font.ITALIC, 13));
+                    none.setBorder(BorderFactory.createEmptyBorder(10, 10, 0, 0));
+                    waitlistCardsPanel.add(none);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JLabel err = new JLabel("Error loading waitlist: " + e.getMessage());
+            err.setForeground(Color.RED);
+            waitlistCardsPanel.add(err);
+        }
+        waitlistCardsPanel.revalidate();
+        waitlistCardsPanel.repaint();
+    }
+
+    private JPanel buildMyBookingsPanel() {
+        JPanel page = new JPanel(new BorderLayout(10, 10));
+        page.setBorder(BorderFactory.createEmptyBorder(16, 16, 16, 16));
+        page.setBackground(new Color(242, 240, 230));
+
+        Font fieldFont = new Font("Lucida Sans", Font.PLAIN, 14);
+
+        JButton btnBack = new JButton("← Back to Dashboard");
+        btnBack.setFont(fieldFont);
+        btnBack.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                cardLayout.show(rootPanel, "dashboard");
+            }
+        });
+
+        JLabel title = new JLabel("My Bookings");
+        title.setFont(new Font("Lucida Sans", Font.BOLD, 20));
+
+        JPanel topPanel = new JPanel(new BorderLayout(10, 0));
+        topPanel.setOpaque(false);
+        topPanel.add(btnBack, BorderLayout.WEST);
+        topPanel.add(title, BorderLayout.CENTER);
+
+        bookingsCardsPanel = new JPanel();
+        bookingsCardsPanel.setLayout(new BoxLayout(bookingsCardsPanel, BoxLayout.Y_AXIS));
+        bookingsCardsPanel.setBackground(new Color(242, 240, 230));
+        bookingsCardsPanel.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0));
+
+        JScrollPane bookingsScroll = new JScrollPane(bookingsCardsPanel);
+        bookingsScroll.setBorder(BorderFactory.createTitledBorder("My Bookings"));
+        bookingsScroll.getVerticalScrollBar().setUnitIncrement(16);
+        bookingsScroll.setBackground(new Color(242, 240, 230));
+
+        waitlistCardsPanel = new JPanel();
+        waitlistCardsPanel.setLayout(new BoxLayout(waitlistCardsPanel, BoxLayout.Y_AXIS));
+        waitlistCardsPanel.setBackground(new Color(242, 240, 230));
+        waitlistCardsPanel.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 0));
+
+        JScrollPane waitlistScroll = new JScrollPane(waitlistCardsPanel);
+        waitlistScroll.setBorder(BorderFactory.createTitledBorder("My Waitlist"));
+        waitlistScroll.getVerticalScrollBar().setUnitIncrement(16);
+        waitlistScroll.setBackground(new Color(242, 240, 230));
+
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, bookingsScroll, waitlistScroll);
+        splitPane.setResizeWeight(0.72);
+        splitPane.setDividerSize(6);
+
+        page.add(topPanel, BorderLayout.NORTH);
+        page.add(splitPane, BorderLayout.CENTER);
+        return page;
+    }
+
     public static void main(String[] args) throws Exception {
         // Initialize the connection to the database
         String url = "jdbc:mysql://localhost:3306/reservation_system";
@@ -1194,6 +3004,67 @@ public class ProjectFrame extends JFrame {
             System.out.println("Unable to create a connection to the database");
             e.printStackTrace();
             System.exit(0);
+        }
+
+        // First-run check: if no admin exists, prompt to create one before login
+        try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM users WHERE role = 'admin'")) {
+            rs.next();
+            if (rs.getInt(1) == 0) {
+                Font dlgFont = new Font("Lucida Sans", Font.PLAIN, 14);
+                JTextField tfAdminUser    = new JTextField(18);
+                JPasswordField tfAdminPass = new JPasswordField(18);
+                JPasswordField tfAdminConf = new JPasswordField(18);
+                tfAdminUser.setFont(dlgFont);
+                tfAdminPass.setFont(dlgFont);
+                tfAdminConf.setFont(dlgFont);
+
+                JPanel setupPanel = new JPanel(new GridLayout(4, 2, 8, 8));
+                setupPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+                JLabel hdr = new JLabel("No admin account found. Create the first admin:");
+                hdr.setFont(new Font("Lucida Sans", Font.BOLD, 13));
+                setupPanel.add(hdr);           setupPanel.add(new JLabel());
+                setupPanel.add(new JLabel("Username:")); setupPanel.add(tfAdminUser);
+                setupPanel.add(new JLabel("Password:")); setupPanel.add(tfAdminPass);
+                setupPanel.add(new JLabel("Confirm password:")); setupPanel.add(tfAdminConf);
+
+                while (true) {
+                    int choice = JOptionPane.showConfirmDialog(null, setupPanel,
+                            "First-Time Setup — Create Admin Account",
+                            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+                    if (choice != JOptionPane.OK_OPTION) { System.exit(0); }
+
+                    String adminUser = tfAdminUser.getText().trim();
+                    String adminPass = new String(tfAdminPass.getPassword()).trim();
+                    String adminConf = new String(tfAdminConf.getPassword()).trim();
+
+                    if (adminUser.isEmpty() || adminPass.isEmpty()) {
+                        JOptionPane.showMessageDialog(null, "Username and password cannot be empty.");
+                        continue;
+                    }
+                    if (!adminPass.equals(adminConf)) {
+                        JOptionPane.showMessageDialog(null, "Passwords do not match. Try again.");
+                        continue;
+                    }
+                    try (PreparedStatement ps = con.prepareStatement(
+                            "INSERT INTO users (`user`, `password`, role) VALUES (?, ?, 'admin')")) {
+                        ps.setString(1, adminUser);
+                        ps.setString(2, adminPass);
+                        ps.executeUpdate();
+                        JOptionPane.showMessageDialog(null,
+                                "Admin account \"" + adminUser + "\" created.\n"
+                                + "Log in with these credentials to manage the system.",
+                                "Setup Complete", JOptionPane.INFORMATION_MESSAGE);
+                        break;
+                    } catch (SQLException ex) {
+                        if (ex.getErrorCode() == 1062) {
+                            JOptionPane.showMessageDialog(null,
+                                    "Username \"" + adminUser + "\" is already taken. Choose another.");
+                        } else {
+                            JOptionPane.showMessageDialog(null, "Error: " + ex.getMessage());
+                        }
+                    }
+                }
+            }
         }
 
         ProjectFrame myFrame = new ProjectFrame();
